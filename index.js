@@ -290,33 +290,52 @@ client.on('messageCreate', async (message) => {
     }
 
     try {
-      const targetGuild = await client.guilds.fetch(activeData.guildId);
-      const targetMember = await targetGuild.members.fetch(activeData.studentId);
-      const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
-
-      if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
-        await targetMember.roles.add(izinliRole);
+      let targetGuild = client.guilds.cache.get(activeData.guildId);
+      if (!targetGuild) {
+        targetGuild = await client.guilds.fetch(activeData.guildId);
       }
+      
+      const targetMember = await targetGuild.members.fetch(activeData.studentId);
 
-      const userDmEmbed = new EmbedBuilder()
-        .setTitle('📑 Ders Mazeret Bidiriminiz Yanıtlandı')
-        .setColor('#00ff00')
-        .addFields(
-          { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
-          { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false },
-          { name: 'Sorumlu Notu / Sebep', value: message.content || 'Bir açıklama belirtilmedi.' }
-        )
-        .setTimestamp();
+      if (activeData.action === 'approve') {
+        const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
+        if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
+          await targetMember.roles.add(izinliRole);
+        }
 
-      await targetMember.send({ embeds: [userDmEmbed] });
+        const userDmEmbed = new EmbedBuilder()
+          .setTitle('📑 Ders Mazeret Bildiriminiz Onaylandı')
+          .setColor('#00ff00')
+          .addFields(
+            { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
+            { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false },
+            { name: 'Sorumlu Notu / Açıklama', value: message.content || 'Bir açıklama belirtilmedi.' }
+          )
+          .setTimestamp();
 
-      await message.reply(`✅ **Yanıtınız başarıyla iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Açıklama:** ${message.content}\n• **İzin Rolü:** Tanımlandı.`);
+        await targetMember.send({ embeds: [userDmEmbed] });
+        await message.reply(`✅ **Onay yanıtınız iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Açıklama:** ${message.content}\n• **İzin Rolü:** Tanımlandı.`);
+
+      } else if (activeData.action === 'reject') {
+        const userDmEmbed = new EmbedBuilder()
+          .setTitle('📑 Ders Mazeret Bildiriminiz Reddedildi')
+          .setColor('#ff0000')
+          .addFields(
+            { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
+            { name: 'Verilen Karar', value: '❌ Mazeretiniz Reddedildi', inline: false },
+            { name: 'Red Sebebi / Not', value: message.content || 'Bir sebep belirtilmedi.' }
+          )
+          .setTimestamp();
+
+        await targetMember.send({ embeds: [userDmEmbed] });
+        await message.reply(`🛑 **Red yanıtınız iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Red Sebebi:** ${message.content}`);
+      }
 
       activeMazeretReplies.delete(message.author.id);
 
     } catch (err) {
       console.error('DM yanıtı gönderilirken hata oluştu:', err);
-      await message.reply('❌ Mesaj iletilirken veya rol verilirken bir hata oluştu.');
+      await message.reply('❌ Mesaj iletilirken veya rol verilirken bir hata oluştu. Kullanıcının DM kutusu kapalı olabilir.');
     }
     return;
   }
@@ -339,11 +358,16 @@ client.on('messageCreate', async (message) => {
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`btn_mazeret_cevap_${message.author.id}`)
-        .setLabel('DM üzerinden Cevapla & İzin Ver')
-        .setStyle(ButtonStyle.Success)
+        .setCustomId(`btn_mazeret_onay_${message.author.id}_${message.guild.id}`)
+        .setLabel('Onayla & İzin Ver')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`btn_mazeret_red_${message.author.id}_${message.guild.id}`)
+        .setLabel('Mazereti Reddet')
+        .setStyle(ButtonStyle.Danger)
     );
 
+    await message.guild.members.fetch();
     const membersWithAkademiRole = message.guild.members.cache.filter(m => m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID));
 
     membersWithAkademiRole.forEach(async (sorumlu) => {
@@ -635,17 +659,37 @@ client.on('interactionCreate', async (interaction) => {
 
   const { customId, user, guild, channel, member } = interaction;
 
-  // --- AKADEMİ SORUMLUSU DM ÜZERİNDEN CEVAP VER BUTONU ---
-  if (customId.startsWith('btn_mazeret_cevap_')) {
-    const studentId = customId.replace('btn_mazeret_cevap_', '');
+  // --- AKADEMİ SORUMLUSU ONAY / RED BUTONLARI ---
+  if (customId.startsWith('btn_mazeret_onay_')) {
+    const parts = customId.split('_');
+    const studentId = parts[3];
+    const guildId = parts[4];
 
     activeMazeretReplies.set(user.id, {
       studentId: studentId,
-      guildId: guild ? guild.id : '1463553956839166013'
+      guildId: guildId,
+      action: 'approve'
     });
 
     return interaction.reply({
-      content: '📝 **Lütfen mazereti onaylama nedeninizi / açıklamanızı doğrudan bu DM sohbetine yazıp gönderin.**\n*(Yazacağınız mesaj doğrudan personele iletilecek ve kişiye İzinli Rolü tanımlanacaktır.)*',
+      content: '🟢 **Mazeret ONAY süreci başlatıldı.**\nLütfen onay gerekçenizi / notunuzu bu DM sohbetine yazıp gönderin. Kişiye izinli rolü otomatik tanımlanacaktır.',
+      ephemeral: false
+    });
+  }
+
+  if (customId.startsWith('btn_mazeret_red_')) {
+    const parts = customId.split('_');
+    const studentId = parts[3];
+    const guildId = parts[4];
+
+    activeMazeretReplies.set(user.id, {
+      studentId: studentId,
+      guildId: guildId,
+      action: 'reject'
+    });
+
+    return interaction.reply({
+      content: '🔴 **Mazeret RED süreci başlatıldı.**\nLütfen mazereti reddetme sebebinizi bu DM sohbetine yazıp gönderin. Kişiye iletilecektir.',
       ephemeral: false
     });
   }
