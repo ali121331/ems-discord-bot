@@ -375,7 +375,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 3. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  // --- 3. DERS MAZERET BİLDİRİ KANALI İİŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
@@ -468,6 +468,31 @@ client.on('messageCreate', async (message) => {
 
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
+
+  // İsim Değiştirme Kanalı Şablon Kurma Komutu
+  if (command === '!kur-isim-sablon') {
+    const nameChannel = message.guild.channels.cache.get(CONFIG.NAME_CHANGE_CHANNEL_ID) || message.channel;
+
+    const sablonEmbed = new EmbedBuilder()
+      .setTitle('📝 SUNUCU İSİM DEĞİŞTİRME BİLDİRİMİ')
+      .setColor('#00ffcc')
+      .setDescription(
+        `Sunucudaki isminizi değiştirmek için kullanmak istediğiniz **Ad Soyad / Karakter İsmini** doğrudan bu kanala yazmanız yeterlidir.\n\n` +
+        `📌 **Örnek Kullanım:**\n` +
+        `\`\`\`\n` +
+        `John Doe\n` +
+        `\`\`\`\n` +
+        `⚠️ **Bilgilendirme:**\n` +
+        `• Yazdığınız metin otomatik olarak sunucu takma adınız (nickname) olarak ayarlanacaktır.\n` +
+        `• İsminiz güncellendikten sonra mesajınız ve sistem yanıtı kanal temizliği için **otomatik olarak silinecektir**.\n` +
+        `• İsim uzunluğu **32 karakteri** geçemez.`
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await nameChannel.send({ embeds: [sablonEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
 
   // Mazeret Kanalı Şablon Kurma Komutu
   if (command === '!kur-mazeret-sablon') {
