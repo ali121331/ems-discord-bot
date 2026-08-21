@@ -33,6 +33,8 @@ const CONFIG = {
   WELCOME_CHANNEL_ID: '1463553957468180700',
   TICKET_CATEGORY_ID: '1540114356329517096',
   KADRO_PANEL_CHANNEL_ID: '1540107816285511742',
+  TEDAVI_UCRET_CHANNEL_ID: '1540107777752563793',
+  FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&',
 
   ROLES: {
@@ -88,7 +90,14 @@ const CONFIG = {
 // Veri depolama
 const activeShifts = new Map();
 const totalShifts = new Map();
+const userInvoices = new Map(); // Kullanıcı bazlı fatura sayıları
 let kadroUpdateTimeout = null;
+
+// Dinamik Ücret ve Oran Ayarları (Y: Saatlik Ücret, Z: Fatura Başı Ücret)
+const SALARY_CONFIG = {
+  HOURLY_RATE: 100, // Y miktarı
+  INVOICE_RATE: 50   // Z miktarı
+};
 
 // --- ORTAK KADRO PANELİ OLUŞTURMA FONKSİYONU ---
 async function updateKadroPanel(guild) {
@@ -245,10 +254,45 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   }, 5000);
 });
 
-// YÖNETİCİ KOMUTLARI
+// TEDAVİ ÜCRET KANALINI DİNLEME VE FATURA LOGUNA AKTARMA
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
+  // Tedavi Ücret Kanalına Mesaj Atıldığında Otomatik Yönlendirme
+  if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
+    const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
+
+    if (logChannel) {
+      const embed = new EmbedBuilder()
+        .setTitle('📑 Yeni Tedavi / Fatura Kaydı')
+        .setColor('#00ffcc')
+        .addFields(
+          { name: 'Personel', value: `${message.author} (${message.author.tag})`, inline: true },
+          { name: 'Kanal', value: `${message.channel}`, inline: true },
+          { name: 'İçerik / Detay', value: message.content || 'Görsel/Dosya Gönderildi' }
+        )
+        .setTimestamp();
+
+      if (message.attachments.size > 0) {
+        embed.setImage(message.attachments.first().url);
+      }
+
+      await logChannel.send({ embeds: [embed] });
+
+      // Kullanıcının Fatura Sayısını Artır
+      const currentInvoices = userInvoices.get(message.author.id) || 0;
+      userInvoices.set(message.author.id, currentInvoices + 1);
+    }
+
+    try {
+      await message.delete();
+    } catch (err) {
+      console.error('Mesaj silinemedi:', err);
+    }
+    return;
+  }
+
+  // --- YÖNETİCİ VE SİSTEM KOMUTLARI ---
   if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
   const args = message.content.trim().split(/ +/);
@@ -256,7 +300,7 @@ client.on('messageCreate', async (message) => {
 
   // 1. Manuel Kadro Paneli Güncelleme Komutu
   if (command === '!kadro-guncelle') {
-    if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout); // Bekleyen otomatik güncellemeyi iptal et
+    if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
 
     const success = await updateKadroPanel(message.guild);
     try { await message.delete(); } catch (e) {}
@@ -303,7 +347,81 @@ client.on('messageCreate', async (message) => {
     try { await message.delete(); } catch (e) {}
   }
 
-  // 4. Kullanıcıya Mesai Ekleme (!mesai-ekle @Kullanici 60)
+  // 4. Tedavi Ücret Listesi Paneli Kurma
+  if (command === '!kur-fiyat-listesi') {
+    const targetChannel = message.guild.channels.cache.get(CONFIG.TEDAVI_UCRET_CHANNEL_ID) || message.channel;
+
+    const listEmbed = new EmbedBuilder()
+      .setTitle('🏥 EMS TEDAVİ VE HİZMET ÜCRET TARİFESİ')
+      .setColor('#ff0000')
+      .setDescription('Aşağıda hastanemizde uygulanan varsayılan tedavi ücretleri listelenmiştir:\n\n' +
+        '• **İlk Yardım Müdahalesi:** $X\n' +
+        '• **Ambulans Çağrı / Nakil Ücreti:** $X\n' +
+        '• **Küçük Cerrahi Operasyonlar / Ameliyat:** $X\n' +
+        '• **Genel Ameliyat ve Yoğun Bakım:** $X\n' +
+        '• **Poliklinik Muayene Ücreti:** $X\n' +
+        '• **İlaç ve Serum Tedavisi:** $X\n' +
+        '• **Radyolojik Görüntüleme / Tahlil:** $X\n\n' +
+        '*(Lütfen kestiğiniz faturaları ve tedavi detaylarını bu kanala yazarak iletiniz.)*')
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await targetChannel.send({ embeds: [listEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // 5. Saatlik Ücret ve Fatura Yüzdesini / Ücretini Ayarlama (!maas-ayarla <Y> <Z>)
+  if (command === '!maas-ayarla') {
+    const hourly = parseFloat(args[1]);
+    const invoice = parseFloat(args[2]);
+
+    if (isNaN(hourly) || isNaN(invoice)) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!maas-ayarla 100 50` *(100$ saatlik ücret, 50$ fatura başı ücret)*');
+    }
+
+    SALARY_CONFIG.HOURLY_RATE = hourly;
+    SALARY_CONFIG.INVOICE_RATE = invoice;
+
+    return message.reply(`✅ **Maaş parametreleri güncellendi!**\n• Saat Başı Ücret (Y): **$${hourly}**\n• Fatura Başı Ücret (Z): **$${invoice}**`);
+  }
+
+  // 6. Maaş ve Mesai Hesaplama Komutu (!maas-hesapla @Kullanici)
+  if (command === '!maas-hesapla') {
+    const targetUser = message.mentions.users.first() || message.author;
+
+    let accumulatedMs = totalShifts.get(targetUser.id) || 0;
+    if (activeShifts.has(targetUser.id)) {
+      const shift = activeShifts.get(targetUser.id);
+      accumulatedMs += (Date.now() - shift.startTime);
+    }
+
+    const totalHours = accumulatedMs / (1000 * 60 * 60);
+    const invoiceCount = userInvoices.get(targetUser.id) || 0;
+
+    const shiftEarnings = totalHours * SALARY_CONFIG.HOURLY_RATE;
+    const invoiceEarnings = invoiceCount * SALARY_CONFIG.INVOICE_RATE;
+    const totalEarnings = shiftEarnings + invoiceEarnings;
+
+    const hours = Math.floor(totalHours);
+    const minutes = Math.floor((accumulatedMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    const resultEmbed = new EmbedBuilder()
+      .setTitle(`💰 Maaş ve Hak Hakediş Raporu`)
+      .setColor('#00ff00')
+      .setDescription(`${targetUser} kullanıcısının güncel hesaplama detayları:`)
+      .addFields(
+        { name: '⏱️ Toplam Mesai', value: `${hours} saat ${minutes} dakika`, inline: true },
+        { name: '📝 Kesilen Fatura', value: `${invoiceCount} adet`, inline: true },
+        { name: '💵 Mesai Kazancı (Y)', value: `$${shiftEarnings.toFixed(2)}`, inline: true },
+        { name: '💵 Fatura Kazancı (Z)', value: `$${invoiceEarnings.toFixed(2)}`, inline: true },
+        { name: '🏆 Toplam Alacak Maaş', value: `**$${totalEarnings.toFixed(2)}**`, inline: false }
+      )
+      .setTimestamp();
+
+    return message.reply({ embeds: [resultEmbed] });
+  }
+
+  // 7. Kullanıcıya Mesai Ekleme
   if (command === '!mesai-ekle') {
     const targetUser = message.mentions.users.first();
     const addMinutes = parseInt(args[2]);
@@ -319,7 +437,7 @@ client.on('messageCreate', async (message) => {
     return message.reply(`✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`);
   }
 
-  // 5. Kullanıcıdan Mesai Düşme (!mesai-cikar @Kullanici 30)
+  // 8. Kullanıcıdan Mesai Düşme
   if (command === '!mesai-cikar') {
     const targetUser = message.mentions.users.first();
     const removeMinutes = parseInt(args[2]);
