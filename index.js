@@ -36,13 +36,15 @@ const CONFIG = {
   WELCOME_CHANNEL_ID: '1463553957468180700',
   TICKET_CATEGORY_ID: '1540114356329517096',
   KADRO_PANEL_CHANNEL_ID: '1540107816285511742',
+  EGITMEN_PANEL_CHANNEL_ID: '1540109400201760899', // Eğitmen Kadrosu Kanal ID
   TEDAVI_UCRET_CHANNEL_ID: '1540107777752563793',
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
-  NAME_CHANGE_CHANNEL_ID: '1540108109433933905', // Otomatik isim değiştirme kanalı
+  NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
   // MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_CHANNEL_ID: '1540109672625733642',
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
+  TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
 
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&',
@@ -216,7 +218,7 @@ async function updateKadroPanel(guild) {
     });
 
     if (!embedDescription) {
-      embedDescription = 'Henüz kadroda aktif kayıtlı personel bulunmamaktadır.';
+      embedDescription = 'Henüz kadroda kayıtlı personel bulunmamaktadır.';
     }
 
     const kadroEmbed = new EmbedBuilder()
@@ -238,6 +240,68 @@ async function updateKadroPanel(guild) {
 
   } catch (err) {
     console.error('Kadro paneli güncellenirken hata oluştu:', err);
+    return false;
+  }
+}
+
+// --- EĞİTMEN KADROSU PANELİ OLUŞTURMA FONKSİYONU ---
+async function updateEgitmenPanel(guild) {
+  const egitmenChannel = guild.channels.cache.get(CONFIG.EGITMEN_PANEL_CHANNEL_ID);
+  if (!egitmenChannel) return false;
+
+  try {
+    await guild.members.fetch();
+
+    const akademiSorumlulari = guild.members.cache.filter(m => 
+      m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID)
+    );
+
+    const tipEgitmenleri = guild.members.cache.filter(m => 
+      m.roles.cache.has(CONFIG.TIP_EGITMENI_ROLE_ID) && !m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID)
+    );
+
+    let egitmenDescription = 
+      "Tıp Akademisi bünyesinde teorik, klinik ve pratik eğitim süreçlerini yönetecek yetkili eğitmen kadromuz aşağıda belirtilmiştir. " +
+      "Akademi ile ilgili tüm ders takipleri, mazeret bildirimleri ve sınav değerlendirmeleri bu kadro sorumluluğundadır.\n\n" +
+      "**AKADEMİ YÖNETİMİ VE EĞİTMENLER**\n";
+
+    if (akademiSorumlulari.size > 0) {
+      akademiSorumlulari.forEach(m => {
+        egitmenDescription += `• **[ 🎓 ] Akademi Sorumlusu:** ${m}\n*(Akademi müfredatının yürütülmesi, sınav takvimi, idari koordinasyon ve teorik/pratik tıp dersleri sorumlusu)*\n`;
+      });
+    } else {
+      egitmenDescription += `• **[ 🎓 ] Akademi Sorumlusu:** Atanmış personel bulunmamaktadır.\n`;
+    }
+
+    egitmenDescription += "\n**EĞİTMEN KADROSU**\n";
+
+    if (tipEgitmenleri.size > 0) {
+      tipEgitmenleri.forEach(m => {
+        egitmenDescription += `• **[ 🧑‍🏫 ] Tıp Eğitmeni:** ${m}\n*(Teorik tıp dersleri, klinikte hasta kabulü, vital bulgular ve pratik simülasyonlar sorumlusu)*\n`;
+      });
+    } else {
+      egitmenDescription += `• **[ 🧑‍🏫 ] Tıp Eğitmeni:** Atanmış personel bulunmamaktadır.\n`;
+    }
+
+    const egitmenEmbed = new EmbedBuilder()
+      .setTitle('EMERGENCY MEDICAL SERVICES — AKADEMİ EĞİTMEN KADROSU')
+      .setColor('#5865F2')
+      .setDescription(egitmenDescription)
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    const fetchedMessages = await egitmenChannel.messages.fetch({ limit: 10 });
+    const lastBotMessage = fetchedMessages.find(m => m.author.id === client.user.id);
+
+    if (lastBotMessage) {
+      await lastBotMessage.edit({ embeds: [egitmenEmbed] });
+    } else {
+      await egitmenChannel.send({ embeds: [egitmenEmbed] });
+    }
+    return true;
+
+  } catch (err) {
+    console.error('Eğitmen kadro paneli güncellenirken hata oluştu:', err);
     return false;
   }
 }
@@ -268,15 +332,23 @@ client.on('guildMemberAdd', async (member) => {
   });
 });
 
-// OTOMATİK KADRO PANELİ GÜNCELLEME (DEBOUNCE)
+// OTOMATİK PANELLERİ GÜNCELLEME (KADRO & EĞİTMEN)
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  if (oldMember.roles.cache.size === newMember.roles.cache.size && oldMember.displayName === newMember.displayName) return;
+  const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
+  const newRoles = newMember.roles.cache.map(r => r.id).sort().join(',');
+
+  const hasNameChanged = oldMember.displayName !== newMember.displayName;
+  const hasRolesChanged = oldRoles !== newRoles;
+
+  if (!hasNameChanged && !hasRolesChanged) return;
 
   if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
 
   kadroUpdateTimeout = setTimeout(async () => {
+    console.log(`[OTOMATİK PANEL] ${newMember.user.tag} verisi değişti, tüm paneller güncelleniyor...`);
     await updateKadroPanel(newMember.guild);
-  }, 5000);
+    await updateEgitmenPanel(newMember.guild);
+  }, 2000);
 });
 
 // KANAL VE DM MESAJLARI DİNLEME
@@ -375,7 +447,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 3. DERS MAZERET BİLDİRİ KANALI İİŞLEMLERİ ---
+  // --- 3. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
@@ -530,6 +602,20 @@ client.on('messageCreate', async (message) => {
       setTimeout(() => msg.delete().catch(() => {}), 5000);
     } else {
       const msg = await message.channel.send('❌ **Kadro paneli güncellenirken bir hata oluştu veya kanal bulunamadı.**');
+      setTimeout(() => msg.delete().catch(() => {}), 5000);
+    }
+  }
+
+  // Manuel Eğitmen Paneli Güncelleme Komutu
+  if (command === '!egitmen-kadro-guncelle') {
+    const success = await updateEgitmenPanel(message.guild);
+    try { await message.delete(); } catch (e) {}
+
+    if (success) {
+      const msg = await message.channel.send('✅ **Eğitmen kadro paneli başarıyla güncellendi!**');
+      setTimeout(() => msg.delete().catch(() => {}), 5000);
+    } else {
+      const msg = await message.channel.send('❌ **Eğitmen kadro paneli güncellenirken bir hata oluştu veya kanal bulunamadı.**');
       setTimeout(() => msg.delete().catch(() => {}), 5000);
     }
   }
