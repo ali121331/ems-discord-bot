@@ -7,7 +7,10 @@ const {
   ButtonStyle, 
   PermissionFlagsBits, 
   ChannelType,
-  Partials
+  Partials,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require('discord.js');
 const express = require('express');
 
@@ -43,8 +46,8 @@ const CONFIG = {
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
   // MAZERET BİLDİRİM VE İZİN SİSTEMİ
-  MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', // Personelin mazeret yazacağı kanal
-  MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   // Mazeret bildiriminin düşeceği kanal
+  MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', 
+  MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
   TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
@@ -383,6 +386,8 @@ client.on('messageCreate', async (message) => {
 
   // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_YAZMA_CHANNEL_ID) {
+    const msgId = message.id; // Benzersiz Takip ID'si
+
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
       .setColor('#ff9900')
@@ -391,6 +396,7 @@ client.on('messageCreate', async (message) => {
         { name: 'Personel ID', value: `${message.author.id}`, inline: true },
         { name: 'Mazeret Detayı', value: message.content || 'Görsel/Dosya Gönderildi' }
       )
+      .setFooter({ text: `Mazeret ID: ${msgId}` })
       .setTimestamp();
 
     if (message.attachments.size > 0) {
@@ -399,11 +405,11 @@ client.on('messageCreate', async (message) => {
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`btn_mazeret_onay_${message.author.id}`)
+        .setCustomId(`btn_mazeret_onay_${message.author.id}_${msgId}`)
         .setLabel('Onayla & İzin Ver')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`btn_mazeret_red_${message.author.id}`)
+        .setCustomId(`btn_mazeret_red_${message.author.id}_${msgId}`)
         .setLabel('Mazereti Reddet')
         .setStyle(ButtonStyle.Danger)
     );
@@ -729,257 +735,174 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// BUTON ETKİLEŞİMLERİ
+// ETKİLEŞİM DİNLEYİCİSİ (BUTONLAR & MODALLAR)
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
 
-  const { customId, user, guild, message } = interaction;
+  // --- 1. BUTON TIKLAMALARI ---
+  if (interaction.isButton()) {
+    const { customId, user, guild } = interaction;
 
-  // --- AKADEMİ SORUMLUSU ONAY / RED BUTONLARI ---
-  if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
-    
-    // DM'den tıklanırsa targetGuild çekilir
-    const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
-    if (!targetGuild) {
-      return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
-    }
-
-    let authorizingMember;
-    try {
-      authorizingMember = await targetGuild.members.fetch(user.id);
-    } catch (e) {
-      return interaction.reply({ content: '❌ Sunucudaki üyeliğiniz doğrulanamadı.', ephemeral: true });
-    }
-
-    const isAkademiSorumlusu = authorizingMember.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || 
-                               authorizingMember.permissions.has(PermissionFlagsBits.Administrator);
-
-    if (!isAkademiSorumlusu) {
-      return interaction.reply({
-        content: '❌ **Mazeret taleplerini yalnızca Akademi Sorumluları ve Yöneticiler yanıtlayabilir!**',
-        ephemeral: true
-      });
-    }
-
-    const parts = customId.split('_');
-    const actionType = parts[2]; 
-    const studentId = parts[3];
-
-    try {
-      const targetMember = await targetGuild.members.fetch(studentId);
-
-      if (actionType === 'onay') {
-        const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
-        if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
-          await targetMember.roles.add(izinliRole);
-        }
-
-        const userDmEmbed = new EmbedBuilder()
-          .setTitle('📑 Ders Mazeret Bildiriminiz Onaylandı')
-          .setColor('#00ff00')
-          .addFields(
-            { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
-            { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false }
-          )
-          .setTimestamp();
-
-        await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
-
-        const updatedEmbed = EmbedBuilder.from(message.embeds[0])
-          .setColor('#00ff00')
-          .addFields(
-            { name: '⚡ Durum', value: `✅ **ONAYLANDI** (${user.tag})`, inline: false }
-          );
-
-        const disabledRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('disabled_1').setLabel('✅ Onaylandı').setStyle(ButtonStyle.Success).setDisabled(true)
-        );
-
-        await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
-
-      } else if (actionType === 'red') {
-        const userDmEmbed = new EmbedBuilder()
-          .setTitle('📑 Ders Mazeret Bildiriminiz Reddedildi')
-          .setColor('#ff0000')
-          .addFields(
-            { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
-            { name: 'Verilen Karar', value: '❌ Mazeretiniz Reddedildi', inline: false }
-          )
-          .setTimestamp();
-
-        await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
-
-        const updatedEmbed = EmbedBuilder.from(message.embeds[0])
-          .setColor('#ff0000')
-          .addFields(
-            { name: '⚡ Durum', value: `❌ **REDDEDİLDİ** (${user.tag})`, inline: false }
-          );
-
-        const disabledRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('disabled_2').setLabel('❌ Reddedildi').setStyle(ButtonStyle.Danger).setDisabled(true)
-        );
-
-        await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
+    // --- AKADEMİ SORUMLUSU ONAY / RED BUTON TIKLAMASI (SEBEP PENCERESİ AÇAR) ---
+    if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
+      
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      if (!targetGuild) {
+        return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
       }
-    } catch (err) {
-      console.error('Mazeret işlem hatası:', err);
-      return interaction.reply({ content: '❌ İşlem gerçekleştirilirken bir hata oluştu.', ephemeral: true });
-    }
-    return;
-  }
 
-  // --- MESAİ GİRİŞ ---
-  if (customId === 'btn_mesai_giris') {
-    if (activeShifts.has(user.id)) {
-      return interaction.reply({ content: 'Zaten aktif bir mesainiz var!', ephemeral: true });
-    }
-
-    const checkTimer = setInterval(async () => {
+      let authorizingMember;
       try {
-        const confirmRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('btn_mesai_devam').setLabel('Evet, Mesaideyim').setStyle(ButtonStyle.Primary)
-        );
+        authorizingMember = await targetGuild.members.fetch(user.id);
+      } catch (e) {
+        return interaction.reply({ content: '❌ Sunucudaki üyeliğiniz doğrulanamadı.', ephemeral: true });
+      }
 
+      const isAkademiSorumlusu = authorizingMember.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || 
+                                 authorizingMember.permissions.has(PermissionFlagsBits.Administrator);
+
+      if (!isAkademiSorumlusu) {
+        return interaction.reply({
+          content: '❌ **Mazeret taleplerini yalnızca Akademi Sorumluları ve Yöneticiler yanıtlayabilir!**',
+          ephemeral: true
+        });
+      }
+
+      const parts = customId.split('_');
+      const actionType = parts[2]; // 'onay' veya 'red'
+      const studentId = parts[3];
+      const mazeretId = parts[4] || '0';
+
+      // MODAL (SEBEP GİRİŞ PENCERESİ) OLUŞTURMA
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_mazeret_${actionType}_${studentId}_${mazeretId}`)
+        .setTitle(actionType === 'onay' ? 'Mazeret Onay Sebebi' : 'Mazeret Red Sebebi');
+
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('mazeret_sebep_input')
+        .setLabel(actionType === 'onay' ? 'Onay Açıklaması / Notu' : 'Reddedilme Sebebi')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder(actionType === 'onay' ? 'Örn: Mazeretiniz uygun görüldü, izin tanımlandı.' : 'Örn: Mazeret bildirimi eksik veya yetersiz.')
+        .setRequired(true)
+        .setMaxLength(500);
+
+      const firstActionRow = new ActionRowBuilder().addComponents(reasonInput);
+      modal.addComponents(firstActionRow);
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // --- MESAİ GİRİŞ ---
+    if (customId === 'btn_mesai_giris') {
+      if (activeShifts.has(user.id)) {
+        return interaction.reply({ content: 'Zaten aktif bir mesainiz var!', ephemeral: true });
+      }
+
+      const checkTimer = setInterval(async () => {
         try {
-          await user.send({
-            content: `⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
-            components: [confirmRow]
-          });
-        } catch (dmErr) {
-          if (interaction.channel) {
-            await interaction.channel.send({
-              content: `${user} (DM Kutunuz kapalı olduğu için buradan bildirildi)\n⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+          const confirmRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('btn_mesai_devam').setLabel('Evet, Mesaideyim').setStyle(ButtonStyle.Primary)
+          );
+
+          try {
+            await user.send({
+              content: `⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
               components: [confirmRow]
             });
-          }
-        }
-
-        const timeoutTimer = setTimeout(async () => {
-          if (activeShifts.has(user.id)) {
-            const shift = activeShifts.get(user.id);
-            clearInterval(shift.checkTimer);
-
-            const durationMs = Date.now() - shift.startTime;
-            const pastTotal = totalShifts.get(user.id) || 0;
-            totalShifts.set(user.id, pastTotal + durationMs);
-
-            activeShifts.delete(user.id);
-
-            try {
-              await user.send(`🛑 30 dakika boyunca yanıt vermediğiniz için mesainiz otomatik olarak sonlandırıldı.`);
-            } catch (e) {}
-
+          } catch (dmErr) {
             if (interaction.channel) {
-              await interaction.channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
+              await interaction.channel.send({
+                content: `${user} (DM Kutunuz kapalı olduğu için buradan bildirildi)\n⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+                components: [confirmRow]
+              });
             }
           }
-        }, 30 * 60 * 1000);
 
-        const currentShift = activeShifts.get(user.id);
-        if (currentShift) currentShift.timeoutTimer = timeoutTimer;
+          const timeoutTimer = setTimeout(async () => {
+            if (activeShifts.has(user.id)) {
+              const shift = activeShifts.get(user.id);
+              clearInterval(shift.checkTimer);
 
-      } catch (err) {
-        console.error('Mesai kontrol işlemi sırasında hata:', err);
-      }
-    }, 60 * 60 * 1000);
+              const durationMs = Date.now() - shift.startTime;
+              const pastTotal = totalShifts.get(user.id) || 0;
+              totalShifts.set(user.id, pastTotal + durationMs);
 
-    activeShifts.set(user.id, {
-      startTime: Date.now(),
-      checkTimer: checkTimer,
-      timeoutTimer: null
-    });
+              activeShifts.delete(user.id);
 
-    return interaction.reply({ content: '✅ **Mesaiye giriş yapıldı.** İyi çalışmalar! Kontroller DM üzerinden sağlanacaktır.', ephemeral: true });
-  }
+              try {
+                await user.send(`🛑 30 dakika boyunca yanıt vermediğiniz için mesainiz otomatik olarak sonlandırıldı.`);
+              } catch (e) {}
 
-  // --- MESAİ DEVAM ONAYI ---
-  if (customId === 'btn_mesai_devam') {
-    const shift = activeShifts.get(user.id);
-    if (!shift) {
-      return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor.', ephemeral: true });
+              if (interaction.channel) {
+                await interaction.channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
+              }
+            }
+          }, 30 * 60 * 1000);
+
+          const currentShift = activeShifts.get(user.id);
+          if (currentShift) currentShift.timeoutTimer = timeoutTimer;
+
+        } catch (err) {
+          console.error('Mesai kontrol işlemi sırasında hata:', err);
+        }
+      }, 60 * 60 * 1000);
+
+      activeShifts.set(user.id, {
+        startTime: Date.now(),
+        checkTimer: checkTimer,
+        timeoutTimer: null
+      });
+
+      return interaction.reply({ content: '✅ **Mesaiye giriş yapıldı.** İyi çalışmalar! Kontroller DM üzerinden sağlanacaktır.', ephemeral: true });
     }
 
-    if (shift.timeoutTimer) {
-      clearTimeout(shift.timeoutTimer);
-      shift.timeoutTimer = null;
-    }
-
-    await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!' });
-  }
-
-  // --- MESAİ ÇİKİŞ ---
-  if (customId === 'btn_mesai_cikis') {
-    if (!activeShifts.has(user.id)) {
-      return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor!', ephemeral: true });
-    }
-
-    const shift = activeShifts.get(user.id);
-    clearInterval(shift.checkTimer);
-    if (shift.timeoutTimer) clearTimeout(shift.timeoutTimer);
-
-    const durationMs = Date.now() - shift.startTime;
-    const pastTotal = totalShifts.get(user.id) || 0;
-    totalShifts.set(user.id, pastTotal + durationMs);
-
-    activeShifts.delete(user.id);
-
-    const minutes = Math.floor(durationMs / 60000);
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-
-    return interaction.reply({ 
-      content: `🛑 **Mesaiden çıkış yapıldı.** Bu oturumdaki süreniz: **${hours} saat ${remainingMinutes} dakika**.`, 
-      ephemeral: true 
-    });
-  }
-
-  // --- TOPLAM MESAİLERİM ---
-  if (customId === 'btn_toplam_mesai') {
-    let accumulatedMs = totalShifts.get(user.id) || 0;
-
-    if (activeShifts.has(user.id)) {
+    // --- MESAİ DEVAM ONAYI ---
+    if (customId === 'btn_mesai_devam') {
       const shift = activeShifts.get(user.id);
-      accumulatedMs += (Date.now() - shift.startTime);
+      if (!shift) {
+        return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor.', ephemeral: true });
+      }
+
+      if (shift.timeoutTimer) {
+        clearTimeout(shift.timeoutTimer);
+        shift.timeoutTimer = null;
+      }
+
+      await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!' });
     }
 
-    const totalMinutes = Math.floor(accumulatedMs / 60000);
-    const totalHours = Math.floor(totalMinutes / 60);
-    const remainingMinutes = totalMinutes % 60;
+    // --- MESAİ ÇİKİŞ ---
+    if (customId === 'btn_mesai_cikis') {
+      if (!activeShifts.has(user.id)) {
+        return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor!', ephemeral: true });
+      }
 
-    return interaction.reply({
-      content: `📊 **Toplam Mesai Süreniz:** **${totalHours} saat ${remainingMinutes} dakika**.`,
-      ephemeral: true
-    });
-  }
+      const shift = activeShifts.get(user.id);
+      clearInterval(shift.checkTimer);
+      if (shift.timeoutTimer) clearTimeout(shift.timeoutTimer);
 
-  // --- TÜM PERSONEL MESAİLERİ ---
-  if (customId === 'btn_tum_mesailer') {
-    const hasRole = interaction.member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || interaction.member?.permissions?.has(PermissionFlagsBits.Administrator);
+      const durationMs = Date.now() - shift.startTime;
+      const pastTotal = totalShifts.get(user.id) || 0;
+      totalShifts.set(user.id, pastTotal + durationMs);
 
-    if (!hasRole) {
-      return interaction.reply({
-        content: '❌ **Bu işlem için Hastane Personeli yetkisine sahip olmalısınız!**',
-        ephemeral: true
+      activeShifts.delete(user.id);
+
+      const minutes = Math.floor(durationMs / 60000);
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+
+      return interaction.reply({ 
+        content: `🛑 **Mesaiden çıkış yapıldı.** Bu oturumdaki süreniz: **${hours} saat ${remainingMinutes} dakika**.`, 
+        ephemeral: true 
       });
     }
 
-    const allUserIds = new Set([...totalShifts.keys(), ...activeShifts.keys()]);
+    // --- TOPLAM MESAİLERİM ---
+    if (customId === 'btn_toplam_mesai') {
+      let accumulatedMs = totalShifts.get(user.id) || 0;
 
-    if (allUserIds.size === 0) {
-      return interaction.reply({
-        content: '📋 Henüz sistemde kayıtlı hiçbir mesai verisi bulunmuyor.',
-        ephemeral: true
-      });
-    }
-
-    let description = '';
-
-    for (const userId of allUserIds) {
-      let accumulatedMs = totalShifts.get(userId) || 0;
-      const isCurrentlyActive = activeShifts.has(userId);
-
-      if (isCurrentlyActive) {
-        const shift = activeShifts.get(userId);
+      if (activeShifts.has(user.id)) {
+        const shift = activeShifts.get(user.id);
         accumulatedMs += (Date.now() - shift.startTime);
       }
 
@@ -987,56 +910,197 @@ client.on('interactionCreate', async (interaction) => {
       const totalHours = Math.floor(totalMinutes / 60);
       const remainingMinutes = totalMinutes % 60;
 
-      const statusText = isCurrentlyActive ? '🟢 *(Şu an mesaide)*' : '🔴 *(Mesaide değil)*';
-      description += `<@${userId}> — **${totalHours} saat ${remainingMinutes} dakika** ${statusText}\n`;
+      return interaction.reply({
+        content: `📊 **Toplam Mesai Süreniz:** **${totalHours} saat ${remainingMinutes} dakika**.`,
+        ephemeral: true
+      });
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle('📋 Tüm Personel Mesai Listesi')
-      .setDescription(description)
-      .setColor('#0099ff')
-      .setTimestamp();
+    // --- TÜM PERSONEL MESAİLERİ ---
+    if (customId === 'btn_tum_mesailer') {
+      const hasRole = interaction.member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || interaction.member?.permissions?.has(PermissionFlagsBits.Administrator);
 
-    return interaction.reply({ embeds: [embed], ephemeral: true });
-  }
+      if (!hasRole) {
+        return interaction.reply({
+          content: '❌ **Bu işlem için Hastane Personeli yetkisine sahip olmalısınız!**',
+          ephemeral: true
+        });
+      }
 
-  // --- TİCKET OLUŞTURMA ---
-  if (customId === 'btn_ticket_ac') {
-    if (!guild) return;
-    const channelName = `ticket-${user.username}`;
-    
-    if (guild.channels.cache.find(c => c.name === channelName)) {
-      return interaction.reply({ content: 'Zaten açık bir biletiniz var.', ephemeral: true });
+      const allUserIds = new Set([...totalShifts.keys(), ...activeShifts.keys()]);
+
+      if (allUserIds.size === 0) {
+        return interaction.reply({
+          content: '📋 Henüz sistemde kayıtlı hiçbir mesai verisi bulunmuyor.',
+          ephemeral: true
+        });
+      }
+
+      let description = '';
+
+      for (const userId of allUserIds) {
+        let accumulatedMs = totalShifts.get(userId) || 0;
+        const isCurrentlyActive = activeShifts.has(userId);
+
+        if (isCurrentlyActive) {
+          const shift = activeShifts.get(userId);
+          accumulatedMs += (Date.now() - shift.startTime);
+        }
+
+        const totalMinutes = Math.floor(accumulatedMs / 60000);
+        const totalHours = Math.floor(totalMinutes / 60);
+        const remainingMinutes = totalMinutes % 60;
+
+        const statusText = isCurrentlyActive ? '🟢 *(Şu an mesaide)*' : '🔴 *(Mesaide değil)*';
+        description += `<@${userId}> — **${totalHours} saat ${remainingMinutes} dakika** ${statusText}\n`;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('📋 Tüm Personel Mesai Listesi')
+        .setDescription(description)
+        .setColor('#0099ff')
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    const ticketChannel = await guild.channels.create({
-      name: channelName,
-      type: ChannelType.GuildText,
-      parent: CONFIG.TICKET_CATEGORY_ID,
-      permissionOverwrites: [
-        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-      ]
-    });
+    // --- TİCKET OLUŞTURMA ---
+    if (customId === 'btn_ticket_ac') {
+      if (!guild) return;
+      const channelName = `ticket-${user.username}`;
+      
+      if (guild.channels.cache.find(c => c.name === channelName)) {
+        return interaction.reply({ content: 'Zaten açık bir biletiniz var.', ephemeral: true });
+      }
 
-    const closeBtn = new ButtonBuilder().setCustomId('btn_ticket_kapat').setLabel('Ticket Kapat').setStyle(ButtonStyle.Danger);
-    const closeRow = new ActionRowBuilder().addComponents(closeBtn);
+      const ticketChannel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: CONFIG.TICKET_CATEGORY_ID,
+        permissionOverwrites: [
+          { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+        ]
+      });
 
-    await ticketChannel.send({ 
-      content: `Merhaba ${user}, yetkililer kısa süre içinde sizinle ilgilenecektir.`, 
-      components: [closeRow] 
-    });
+      const closeBtn = new ButtonBuilder().setCustomId('btn_ticket_kapat').setLabel('Ticket Kapat').setStyle(ButtonStyle.Danger);
+      const closeRow = new ActionRowBuilder().addComponents(closeBtn);
 
-    return interaction.reply({ content: `Talebiniz oluşturuldu: ${ticketChannel}`, ephemeral: true });
+      await ticketChannel.send({ 
+        content: `Merhaba ${user}, yetkililer kısa süre içinde sizinle ilgilenecektir.`, 
+        components: [closeRow] 
+      });
+
+      return interaction.reply({ content: `Talebiniz oluşturuldu: ${ticketChannel}`, ephemeral: true });
+    }
+
+    // --- TİCKET KAPATMA ---
+    if (customId === 'btn_ticket_kapat') {
+      await interaction.reply('Ticket 5 saniye içinde kapatılıyor...');
+      setTimeout(() => {
+        interaction.channel.delete().catch(() => {});
+      }, 5000);
+    }
   }
 
-  // --- TİCKET KAPATMA ---
-  if (customId === 'btn_ticket_kapat') {
-    await interaction.reply('Ticket 5 saniye içinde kapatılıyor...');
-    setTimeout(() => {
-      interaction.channel.delete().catch(() => {});
-    }, 5000);
+  // --- 2. MODAL (FORM) GÖNDERİMLERİ ---
+  if (interaction.isModalSubmit()) {
+    const { customId, user, guild } = interaction;
+
+    if (customId.startsWith('modal_mazeret_')) {
+      const parts = customId.split('_');
+      const actionType = parts[2]; // 'onay' veya 'red'
+      const studentId = parts[3];
+      const mazeretId = parts[4];
+      const reason = interaction.fields.getTextInputValue('mazeret_sebep_input');
+
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      if (!targetGuild) {
+        return interaction.reply({ content: '❌ Sunucuya erişilemedi.', ephemeral: true });
+      }
+
+      try {
+        const targetMember = await targetGuild.members.fetch(studentId);
+
+        // ONAY / RED DURUMUNA GÖRE HAZIRLIK
+        const isApproved = actionType === 'onay';
+        const color = isApproved ? '#00ff00' : '#ff0000';
+        const statusTitle = isApproved ? '✅ ONAYLANDI' : '❌ REDDEDİLDİ';
+
+        if (isApproved) {
+          const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
+          if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
+            await targetMember.roles.add(izinliRole);
+          }
+        }
+
+        // ÖĞRENCİYE BİLDİRİM DM'İ GÖNDER
+        const userDmEmbed = new EmbedBuilder()
+          .setTitle(`📑 Ders Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
+          .setColor(color)
+          .addFields(
+            { name: 'Değerlendiren Yetkili', value: `${user.tag}`, inline: true },
+            { name: 'Verilen Karar', value: isApproved ? '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı' : '❌ Mazeretiniz Reddedildi', inline: false },
+            { name: isApproved ? 'Açıklama / Not' : 'Reddedilme Sebebi', value: reason, inline: false }
+          )
+          .setTimestamp();
+
+        await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
+
+        // HER YERDE BUTONLARI DEVRE DIŞI BIRAK (DURUM GÜNCELLEMESİ)
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('disabled_status')
+            .setLabel(`${statusTitle} (${user.username})`)
+            .setStyle(isApproved ? ButtonStyle.Success : ButtonStyle.Danger)
+            .setDisabled(true)
+        );
+
+        // 1. Sunucu Log Kanalındaki Bildirim Embed'ini Güncelle
+        const logChannel = targetGuild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
+        if (logChannel) {
+          try {
+            const fetchedLogMsgs = await logChannel.messages.fetch({ limit: 50 });
+            const logMsg = fetchedLogMsgs.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
+
+            if (logMsg) {
+              const updatedLogEmbed = EmbedBuilder.from(logMsg.embeds[0])
+                .setColor(color)
+                .addFields(
+                  { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
+                  { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
+                );
+
+              await logMsg.edit({ embeds: [updatedLogEmbed], components: [disabledRow] });
+            }
+          } catch (e) {
+            console.error('Log kanalı güncellenirken hata:', e);
+          }
+        }
+
+        // 2. DM Üzerinden Tıklandıysa Tıklanan DM Mesajını da Güncelle
+        if (interaction.message) {
+          const updatedDmEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+            .setColor(color)
+            .addFields(
+              { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
+              { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
+            );
+
+          await interaction.message.edit({ embeds: [updatedDmEmbed], components: [disabledRow] }).catch(() => {});
+        }
+
+        return interaction.reply({
+          content: `✅ Mazeret talebi başarıyla **${isApproved ? 'ONAYLANDI' : 'REDDEDİLDİ'}**.\n**Gerekçe:** ${reason}`,
+          ephemeral: true
+        });
+
+      } catch (err) {
+        console.error('Mazeret modal işlemi hatası:', err);
+        return interaction.reply({ content: '❌ İşlem gerçekleştirilirken bir hata oluştu.', ephemeral: true });
+      }
+    }
   }
 });
 
