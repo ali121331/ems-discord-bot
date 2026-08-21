@@ -6,7 +6,8 @@ const {
   ButtonBuilder, 
   ButtonStyle, 
   PermissionFlagsBits, 
-  ChannelType 
+  ChannelType,
+  Partials
 } = require('discord.js');
 const express = require('express');
 
@@ -23,23 +24,25 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
-  ]
+  ],
+  partials: [Partials.Channel, Partials.Message] // DM Mesajlaşmaları ve Takibi İçin Gerekli
 });
 
 const CONFIG = {
-  TOKEN: process.env.TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GD77TF.QVe1dbKUrLiNN4_kZ1iRWP_lQtJE-UJOe_OQ7U',
+  TOKEN: 'MTU0MTE0MzgzMTYxNDkyMTIzMA.G4mN8W.jU993H4A-83hSjXvQjHTh_eL7c5U0B8zX91k',
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
-  IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
-  AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
-  
   WELCOME_CHANNEL_ID: '1463553957468180700',
   TICKET_CATEGORY_ID: '1540114356329517096',
   KADRO_PANEL_CHANNEL_ID: '1540107816285511742',
   TEDAVI_UCRET_CHANNEL_ID: '1540107777752563793',
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
-  MAZERET_CHANNEL_ID: '1540109672625733642',
   
+  // MAZERET BİLDİRİM VE İZİN SİSTEMİ
+  MAZERET_CHANNEL_ID: '1540109672625733642',
+  AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
+  IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
+
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&',
 
   ROLES: {
@@ -95,15 +98,20 @@ const CONFIG = {
 // Veri depolama
 const activeShifts = new Map();
 const totalShifts = new Map();
-const userInvoices = new Map();
-const userInvoiceCounts = new Map();
+const userInvoices = new Map(); 
+const userInvoiceCounts = new Map(); 
 let kadroUpdateTimeout = null;
 
+// Mazeret takip haritası
+const activeMazeretReplies = new Map(); 
+
+// Dinamik Ücret ve Oran Ayarları
 const SALARY_CONFIG = {
-  HOURLY_RATE: 100,
-  INVOICE_PERCENT: 10
+  HOURLY_RATE: 100,      
+  INVOICE_PERCENT: 10    
 };
 
+// Dinamik Hizmet/Tedavi Fiyat Deposu
 const PRICING = {
   ILK_YARDIM: 250,
   AMBULANS: 500,
@@ -236,6 +244,7 @@ client.once('ready', () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
 });
 
+// Otomatik Rol ve Hoş Geldin Mesajı
 client.on('guildMemberAdd', async (member) => {
   try {
     const role = member.guild.roles.cache.get(CONFIG.VATANDAS_ROLE_ID);
@@ -257,6 +266,7 @@ client.on('guildMemberAdd', async (member) => {
   });
 });
 
+// OTOMATİK KADRO PANELİ GÜNCELLEME (DEBOUNCE)
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   if (oldMember.roles.cache.size === newMember.roles.cache.size) return;
 
@@ -267,71 +277,100 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   }, 5000);
 });
 
-// MESSAGES (TEDAVİ ÜCRET VE MAZERET BİLDİRİM DİNLENMESİ)
+// KANAL VE DM MESAJLARI DİNLEME
 client.on('messageCreate', async (message) => {
-  if (message.author.bot || !message.guild) return;
+  if (message.author.bot) return;
 
-  // --- DERS MAZERET BİLDİRİM KANALI DİNLENMESİ ---
-  if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
-    const guild = message.guild;
-    const author = message.author;
-    const mazeretText = message.content;
-
-    try { await message.delete(); } catch (e) {}
-
-    await guild.members.fetch();
-    const akademiSorumlulari = guild.members.cache.filter(m => m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID));
-
-    if (akademiSorumlulari.size === 0) {
-      try {
-        await author.send('❌ Mazeret talebiniz alınamadı çünkü sistemde aktif bir Akademi Sorumlusu bulunamadı.');
-      } catch (e) {}
-      return;
+  // --- 1. DM CEVAPLAMA SİSTEMİ (AKADEMİ SORUMLUSU DM'DEN CEVAP YAZINCA ÇALIŞIR) ---
+  if (!message.guild) {
+    const activeData = activeMazeretReplies.get(message.author.id);
+    if (!activeData) {
+      return message.reply('❌ Yanıtlamak istediğiniz aktif bir mazeret bildirimi bulunamadı veya süre doldu. Lütfen Discord sunucusundaki buton üzerinden işlemi başlatınız.');
     }
 
-    const mazeretEmbed = new EmbedBuilder()
-      .setTitle('📚 Yeni Ders Mazeret Bildirimi')
-      .setColor('#ff9900')
-      .addFields(
-        { name: '👤 Personel', value: `${author} (${author.tag})`, inline: true },
-        { name: '🆔 Personel ID', value: author.id, inline: true },
-        { name: '📝 Mazeret Detayı', value: mazeretText || 'Detay belirtilmedi.' }
-      )
-      .setTimestamp();
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`btn_mazeret_onay_${author.id}`)
-        .setLabel('Onayla (İzin Ver)')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`btn_mazeret_red_${author.id}`)
-        .setLabel('Reddet')
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    akademiSorumlulari.forEach(async (sorumlu) => {
-      try {
-        await sorumlu.send({ embeds: [mazeretEmbed], components: [row] });
-      } catch (dmErr) {
-        console.error(`${sorumlu.user.tag} kullanıcısına DM gönderilemedi:`, dmErr);
-      }
-    });
-
     try {
-      await author.send('✅ **Ders mazeret bildiriminiz Akademi Sorumlusuna iletildi.** Talebiniz değerlendirildikten sonra tarafınıza bilgi verilecektir.');
-    } catch (e) {}
+      const targetGuild = await client.guilds.fetch(activeData.guildId);
+      const targetMember = await targetGuild.members.fetch(activeData.studentId);
+      const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
+
+      // İzinli Rolü Verilir
+      if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
+        await targetMember.roles.add(izinliRole);
+      }
+
+      // Personelin (Öğrencinin) DM Kutusuna İletilir
+      const userDmEmbed = new EmbedBuilder()
+        .setTitle('📑 Ders Mazeret Bidiriminiz Yanıtlandı')
+        .setColor('#00ff00')
+        .addFields(
+          { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
+          { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false },
+          { name: 'Sorumlu Notu / Sebep', value: message.content || 'Bir açıklama belirtilmedi.' }
+        )
+        .setTimestamp();
+
+      await targetMember.send({ embeds: [userDmEmbed] });
+
+      await message.reply(`✅ **Yanıtınız başarıyla iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Açıklama:** ${message.content}\n• **İzin Rolü:** Tanımlandı.`);
+
+      activeMazeretReplies.delete(message.author.id);
+
+    } catch (err) {
+      console.error('DM yanıtı gönderilirken hata oluştu:', err);
+      await message.reply('❌ Mesaj iletilirken veya rol verilirken bir hata oluştu.');
+    }
     return;
   }
 
-  // --- TEDAVİ ÜCRET KANALINI DİNLEME ---
+  // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
+    const mazeretEmbed = new EmbedBuilder()
+      .setTitle('📥 Yeni Ders Mazeret Bildirimi')
+      .setColor('#ff9900')
+      .addFields(
+        { name: 'Gönderen Personel', value: `${message.author} (${message.author.tag})`, inline: true },
+        { name: 'Personel ID', value: `${message.author.id}`, inline: true },
+        { name: 'Mazeret Detayı', value: message.content || 'Görsel/Dosya Gönderildi' }
+      )
+      .setTimestamp();
+
+    if (message.attachments.size > 0) {
+      mazeretEmbed.setImage(message.attachments.first().url);
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`btn_mazeret_cevap_${message.author.id}`)
+        .setLabel('DM üzerinden Cevapla & İzin Ver')
+        .setStyle(ButtonStyle.Success)
+    );
+
+    const membersWithAkademiRole = message.guild.members.cache.filter(m => m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID));
+
+    membersWithAkademiRole.forEach(async (sorumlu) => {
+      try {
+        await sorumlu.send({
+          content: `🔔 **Akademi Sorumlusu:** <@${message.author.id}> tarafından yeni bir ders mazereti bildirildi!`,
+          embeds: [mazeretEmbed],
+          components: [row]
+        });
+      } catch (e) {
+        console.log(`${sorumlu.user.tag} kullanıcısının DM'i kapalı.`);
+      }
+    });
+
+    try { await message.delete(); } catch (err) {}
+    return;
+  }
+
+  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
 
     const matches = message.content.match(/\d+/g);
     let invoiceAmount = 0;
     if (matches && matches.length > 0) {
-      invoiceAmount = parseFloat(matches[0]);
+      invoiceAmount = parseFloat(matches[0]); 
     }
 
     if (logChannel) {
@@ -372,14 +411,18 @@ client.on('messageCreate', async (message) => {
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
-  // 0. Mazeret Paneli Kurma Komutu
-  if (command === '!kur-mazeret') {
-    const targetChannel = message.guild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID) || message.channel;
+  // Mazeret Kanalı Şablon Kurma Komutu (!kur-mazeret-sablon)
+  if (command === '!kur-mazeret-sablon') {
+    const mazeretChannel = message.guild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID) || message.channel;
 
-    const mazeretPanelEmbed = new EmbedBuilder()
-      .setTitle('📚 DERS MAZERET BİLDİRİM KANALI')
+    const sablonEmbed = new EmbedBuilder()
+      .setTitle('📚 AKADEMİ DERS MAZERET BİLDİRİM FORMU')
       .setColor('#ff9900')
       .setDescription(
-        'Akademi derslerine katılım sağlayamayacak personellerimizin mazeretlerini bu kanala yazmaları gerekmektedir.\n\n' +
-        '📌 **Mazeret Bildirim Şablonu:**\n' +
-        '```\n[Ad Soyadı] - [Mazeret Sebebi] - [Katılamayacağı Tarih/Ders]\n
+        'Eğitim ve Akademi derslerine katılım sağlayamayacak kişilerin mazeretlerini aşağıdaki formata uygun olarak bu kanala yazmaları gerekmektedir.\n\n' +
+        '📌 **Mazeret Bildirim Formatı:**\n' +
+        '```\n' +
+        'Ad Soyad / Rütbe: \n' +
+        'Katılamayacağı Ders / Saat: \n' +
+        'Mazeret / Katılamama Sebebi: \n' +
+        '
