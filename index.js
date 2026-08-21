@@ -45,6 +45,9 @@ const CONFIG = {
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
+  // YENİ: RANDEVU SİSTEMİ LOG KANALI (Buraya ID girilecek)
+  RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
+  
   // AKADEMİ MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', 
   MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   
@@ -540,6 +543,53 @@ client.on('messageCreate', async (message) => {
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
+  // YENİ: RANDEVU PANELİ KURMA KOMUTU
+  if (command === '!kur-randevu') {
+    const randevuEmbed = new EmbedBuilder()
+      .setTitle('🏥 Hastane Randevu Sistemi')
+      .setDescription('Poliklinik randevusu oluşturmak için aşağıdaki "Randevu Al" butonuna tıklayarak formu eksiksiz şekilde doldurunuz. Talebiniz en kısa sürede yetkililerimize iletilecektir.')
+      .setColor('#0099ff')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_randevu_al')
+      .setLabel('Randevu Al')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('📅');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+
+    await message.channel.send({ embeds: [randevuEmbed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // YENİ: DM ÜZERİNDEN RANDEVU PANELİ GÖNDERME KOMUTU
+  if (command === '!randevu-gonder') {
+    const targetUser = message.mentions.users.first() || client.users.cache.get(args[1]);
+    if (!targetUser) return message.reply('❌ **Hatalı kullanım:** Lütfen bir kullanıcı etiketleyin veya ID girin. (Örn: `!randevu-gonder @Vatandaş`)');
+
+    const randevuEmbed = new EmbedBuilder()
+      .setTitle('🏥 Hastane Randevu Sistemi')
+      .setDescription('Hastanemizden randevu almak için aşağıdaki butona tıklayarak formu doldurunuz.')
+      .setColor('#0099ff')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_randevu_al')
+      .setLabel('Randevu Al')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('📅');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+
+    try {
+      await targetUser.send({ embeds: [randevuEmbed], components: [row] });
+      await message.reply(`✅ Randevu paneli ${targetUser} adlı kullanıcıya DM üzerinden başarıyla gönderildi.`);
+    } catch (error) {
+      await message.reply(`❌ ${targetUser} adlı kullanıcının DM kutusu kapalı olduğu için mesaj gönderilemedi.`);
+    }
+  }
+
   if (command === '!kur-isim-sablon') {
     const nameChannel = message.guild.channels.cache.get(CONFIG.NAME_CHANGE_CHANNEL_ID) || message.channel;
 
@@ -846,6 +896,54 @@ client.on('interactionCreate', async (interaction) => {
   // --- 1. BUTON TIKLAMALARI ---
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
+    
+    // YENİ: RANDEVU ALMA BUTONU (Form açar)
+    if (customId === 'btn_randevu_al') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_randevu_al')
+        .setTitle('Randevu Formu');
+
+      const isimInput = new TextInputBuilder()
+        .setCustomId('randevu_isim')
+        .setLabel('Adınız ve Soyadınız')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const bolumInput = new TextInputBuilder()
+        .setCustomId('randevu_bolum')
+        .setLabel('Talep Edilen Bölüm / Doktor')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Genel Cerrahi / Dr. John')
+        .setRequired(true)
+        .setMaxLength(100);
+
+      const tarihInput = new TextInputBuilder()
+        .setCustomId('randevu_tarih')
+        .setLabel('Uygun Olduğunuz Tarih ve Saat')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 25.10.2023 - 14:30')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const sikayetInput = new TextInputBuilder()
+        .setCustomId('randevu_sikayet')
+        .setLabel('Şikayetiniz veya Mazeretiniz')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Şikayetinizi kısaca özetleyiniz...')
+        .setRequired(true)
+        .setMaxLength(500);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(isimInput),
+        new ActionRowBuilder().addComponents(bolumInput),
+        new ActionRowBuilder().addComponents(tarihInput),
+        new ActionRowBuilder().addComponents(sikayetInput)
+      );
+
+      await interaction.showModal(modal);
+      return;
+    }
 
     // --- AKADEMİ VEYA NORMAL PERSONEL MAZERET ONAY/RED BUTONU ---
     if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_') || customId.startsWith('btn_norm_mazeret_onay_') || customId.startsWith('btn_norm_mazeret_red_')) {
@@ -1102,6 +1200,43 @@ client.on('interactionCreate', async (interaction) => {
   // --- 2. MODAL (FORM) GÖNDERİMLERİ ---
   if (interaction.isModalSubmit()) {
     const { customId, user, guild } = interaction;
+
+    // YENİ: RANDEVU FORMUNUN YANITLANMASI
+    if (customId === 'modal_randevu_al') {
+      const isim = interaction.fields.getTextInputValue('randevu_isim');
+      const bolum = interaction.fields.getTextInputValue('randevu_bolum');
+      const tarih = interaction.fields.getTextInputValue('randevu_tarih');
+      const sikayet = interaction.fields.getTextInputValue('randevu_sikayet');
+
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      const randevuKanal = targetGuild?.channels.cache.get(CONFIG.RANDEVU_LOG_CHANNEL_ID);
+
+      if (!randevuKanal) {
+        return interaction.reply({ 
+          content: '❌ **Randevu kanalı bulunamadı.** Sistem yöneticisine bildiriniz (RANDEVU_LOG_CHANNEL_ID eksik).', 
+          ephemeral: true 
+        });
+      }
+
+      const randevuEmbed = new EmbedBuilder()
+        .setTitle('📅 Yeni Randevu Talebi')
+        .setColor('#0099ff')
+        .addFields(
+          { name: '👤 Hasta Bilgisi', value: `${isim} (${user})`, inline: false },
+          { name: '🏥 İstenilen Bölüm / Doktor', value: bolum, inline: true },
+          { name: '🕒 Talep Edilen Tarih', value: tarih, inline: true },
+          { name: '📝 Şikayet / Detay', value: sikayet, inline: false }
+        )
+        .setTimestamp();
+
+      try {
+        await randevuKanal.send({ content: `📌 **Yeni bir randevu talebi ulaştı!** ${user}`, embeds: [randevuEmbed] });
+        return interaction.reply({ content: '✅ Randevu talebiniz başarıyla alındı ve yetkililere iletildi. Geçmiş olsun!', ephemeral: true });
+      } catch (err) {
+        console.error('Randevu loglanırken hata:', err);
+        return interaction.reply({ content: '❌ Randevunuz iletilirken bir sorun oluştu.', ephemeral: true });
+      }
+    }
 
     if (customId.startsWith('modal_mazeret_') || customId.startsWith('modal_norm_mazeret_')) {
       const isNormal = customId.startsWith('modal_norm_mazeret_');
