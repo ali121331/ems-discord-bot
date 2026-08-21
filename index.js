@@ -64,22 +64,22 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption(option => option.setName('kullanici').setDescription('Süresi azaltılacak üye').setRequired(true))
     .addIntegerOption(option => option.setName('dakika').setDescription('Çıkarılacak dakika miktarı').setRequired(true))
-].map(command => command.toJSON());
+];
 
-// --- HAZIR OLUNDUĞUNDA SLASH KOMUTLARINI DISCORD'A KAYDETME ---
+// --- BOT HAZIR OLDUĞUNDA ---
 client.once('ready', async () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
 
   const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
   try {
-    console.log('Slash komutları Discord API\'ye kaydediliyor...');
+    console.log('Slash komutları kaydediliyor...');
     await rest.put(
       Routes.applicationCommands(client.user.id),
-      { body: commands }
+      { body: commands.map(c => c.toJSON()) }
     );
-    console.log('Slash komutları başarıyla kaydedildi!');
+    console.log('Slash komutları başarıyla yüklendi!');
   } catch (error) {
-    console.error('Slash komutları yüklenirken hata oluştu:', error);
+    console.error('Slash komut yükleme hatası:', error);
   }
 });
 
@@ -105,11 +105,14 @@ client.on('guildMemberAdd', async (member) => {
   });
 });
 
-// --- SLASH KOMUT VE BUTON ETKİLEŞİMLERİ ---
+// --- ETKİLEŞİM İŞLEYİCİSİ (INTERACTION CREATE) ---
 client.on('interactionCreate', async (interaction) => {
   
   // 1. SLASH KOMUTLARI
   if (interaction.isChatInputCommand()) {
+    // Komut alındığı an zaman aşımını önlemek için Discord'a "işleniyor" sinyali gönderiyoruz
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
     const { commandName, options } = interaction;
 
     if (commandName === 'kur-mesai') {
@@ -126,7 +129,7 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.reply({ content: 'Mesai paneli başarıyla kuruldu.', ephemeral: true });
+      return interaction.editReply({ content: '✅ Mesai paneli başarıyla kuruldu.' });
     }
 
     if (commandName === 'kur-ticket') {
@@ -140,7 +143,7 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.reply({ content: 'Ticket paneli başarıyla kuruldu.', ephemeral: true });
+      return interaction.editReply({ content: '✅ Ticket paneli başarıyla kuruldu.' });
     }
 
     if (commandName === 'mesai-ekle') {
@@ -151,9 +154,8 @@ client.on('interactionCreate', async (interaction) => {
       const currentTotal = totalShifts.get(targetUser.id) || 0;
       totalShifts.set(targetUser.id, currentTotal + addMs);
 
-      return interaction.reply({ 
-        content: `✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.` 
       });
     }
 
@@ -166,9 +168,8 @@ client.on('interactionCreate', async (interaction) => {
       const newTotal = Math.max(0, currentTotal - removeMs);
       totalShifts.set(targetUser.id, newTotal);
 
-      return interaction.reply({ 
-        content: `🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** düşüldü.`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** düşüldü.` 
       });
     }
   }
