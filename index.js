@@ -30,10 +30,9 @@ const client = new Client({
 });
 
 const CONFIG = {
-  // Render / Hosting üzerindeki Environment Variable (DISCORD_TOKEN) üzerinden okur
   TOKEN: process.env.DISCORD_TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GSrEPH.-kMzYSUFsH6jFQHvM7Miq9Z7kmedvAbGbN2aRU',
   
-  // SADECE DOKTORLARIN GÖREBİLECEĞİ VE RANDEVULARIN DÜŞECEĞİ GİZLİ KANAL ID'Sİ
+  // DOKTORLARIN GÖREBİLECEĞİ RANDEVU LOG/BİLDİRİM KANAL ID'Sİ
   DOKTOR_RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
 
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png'
@@ -43,14 +42,46 @@ client.once('ready', () => {
   console.log(`[BOT] ${client.user.tag} aktif ve göreve hazır!`);
 });
 
-// --- DOKTORLAR İÇİN KOMUTLAR ---
+// --- YÖNETİCİ / DOKTOR KOMUTLARI ---
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
-  // KULLANICI ID'Sİ İLE DM'E RANDEVU PANELİ GÖNDERME KOMUTU
+  // 1. SABİT KANAL RANDEVU PANELİ KURMA KOMUTU (!kur-randevu)
+  if (command === '!kur-randevu') {
+    if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+      return message.reply('❌ **Bu komutu kullanmak için yetkiniz bulunmamaktadır.**');
+    }
+
+    const channelEmbed = new EmbedBuilder()
+      .setTitle('🏥 PILLBOX HILL MEDICAL CENTER — POLİKLİNİK RANDEVU SİSTEMİ')
+      .setColor('#00aaff')
+      .setDescription(
+        `Sayın Vatandaşlarımız,\n\n` +
+        `Uzman doktorlarımızdan randevu almak için aşağıdaki **"📅 Randevu Oluştur"** butonuna tıklayarak açılan formu doldurabilirsiniz.\n\n` +
+        `📌 **Bilgilendirme:**\n` +
+        `• Randevu talebiniz tıp merkezimizdeki uzman doktorlarımıza iletilecektir.\n` +
+        `• Onay veya red durumu tarafınıza **DM (Özel Mesaj)** yoluyla bildirilecektir.\n\n` +
+        `*Hayati tehlike içeren acil durumlar için lütfen 911'i arayınız veya Acil Servis (ER) birimimize başvurunuz.*`
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    const btnRandevu = new ButtonBuilder()
+      .setCustomId('btn_randevu_olustur')
+      .setLabel('📅 Randevu Oluştur')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(btnRandevu);
+
+    await message.channel.send({ embeds: [channelEmbed], components: [row] });
+    await message.delete().catch(() => {});
+    return;
+  }
+
+  // 2. KULLANICI ID'Sİ İLE DM'E ÖZEL RANDEVU PANELİ GÖNDERME KOMUTU (!randevu-gonder <ID>)
   if (command === '!randevu-gonder') {
     if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return message.reply('❌ **Bu komutu kullanmak için yetkiniz bulunmamaktadır.**');
@@ -95,12 +126,14 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// --- ETKİLEŞİM DİNLEYİCİSİ (BUTON VE MODAL) ---
+// --- ETKİLEŞİM DİNLEYİCİSİ (BUTON VE MODAL FORM İŞLEMLERİ) ---
 client.on('interactionCreate', async (interaction) => {
 
+  // --- 1. BUTON ETKİLEŞİMLERİ ---
   if (interaction.isButton()) {
-    const { customId, user } = interaction;
+    const { customId } = interaction;
 
+    // "Randevu Oluştur" Butonuna Basıldığında Form Aç
     if (customId === 'btn_randevu_olustur') {
       const modal = new ModalBuilder()
         .setCustomId('modal_randevu_formu')
@@ -145,6 +178,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // Doktor Onay / Red Butonları
     if (customId.startsWith('btn_randevu_onay_') || customId.startsWith('btn_randevu_red_')) {
       if (interaction.message && interaction.message.components.length > 0) {
         const firstBtn = interaction.message.components[0].components[0];
@@ -175,9 +209,11 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
+  // --- 2. MODAL FORM SUBMIT ETKİLEŞİMLERİ ---
   if (interaction.isModalSubmit()) {
     const { customId, user } = interaction;
 
+    // Vatandaş Randevu Formunu Gönderdiğinde
     if (customId === 'modal_randevu_formu') {
       const adSoyad = interaction.fields.getTextInputValue('randevu_ad_soyad');
       const brans = interaction.fields.getTextInputValue('randevu_brans');
@@ -224,6 +260,7 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
 
+    // Doktor Form Yanıtını (Onay/Red) Gönderdiğinde
     if (customId.startsWith('modal_randevu_yanit_')) {
       const parts = customId.split('_');
       const actionType = parts[parts.length - 3];
@@ -269,7 +306,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         return interaction.reply({
-          content: `✅ Randevu talebi **${isApproved ? 'ONAYLANDI' : 'REDDEDİLDİ'}**. Patient: ${patientUser.tag}`,
+          content: `✅ Randevu talebi **${isApproved ? 'ONAYLANDI' : 'REDDEDİLDİ'}**. Hasta: ${patientUser.tag}`,
           ephemeral: true
         });
 
