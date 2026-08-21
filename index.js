@@ -35,7 +35,6 @@ const CONFIG = {
   KADRO_PANEL_CHANNEL_ID: '1540107816285511742',
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&',
 
-  // GÖRSELLERDEKİ TÜM ROL ID'LERİ (Buradaki tırnak içine Discord'daki Rol ID'lerini gir)
   ROLES: {
     BASHEKIM: '1463553957468180696',
     BASHEKIM_YARDIMCISI: '1463553957451399268',
@@ -89,6 +88,7 @@ const CONFIG = {
 // Veri depolama (Hafızada tutulur)
 const activeShifts = new Map(); // Aktif mesailer
 const totalShifts = new Map();  // Toplam mesai süreleri (ms cinsinden)
+let kadroUpdateTimeout = null;  // Rate-limit önleyici zamanlayıcı
 
 client.once('ready', () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
@@ -111,138 +111,142 @@ client.on('guildMemberAdd', async (member) => {
     .setImage(CONFIG.IMAGE_URL);
 
   await welcomeChannel.send({
-    content: `🚑Merhaba ${member} **EMERGENCY MEDICAL SERVICES**'e Hoşgeldin!\n🩺**EMS ekibine katıldın. Hazır ol, hayat kurtar ve görevini gururla yerine getir!**`,
+    content: `Merhaba ${member} **EMERGENCY MEDICAL SERVICES**'e Hoşgeldin!\n**EMS ekibine katıldın. Hazır ol, hayat kurtar ve görevini gururla yerine getir!**`,
     embeds: [welcomeEmbed]
   });
 });
 
 // ==========================================
-// OTOMATİK KADRO PANELİ GÜNCELLEME (GÖRSELLERDEKİ TÜM ROLLER)
+// OTOMATİK KADRO PANELİ GÜNCELLEME (DEBOUNCE KORUMALI)
 // ==========================================
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  // Rol sayısı değişmediyse işlem yapma
   if (oldMember.roles.cache.size === newMember.roles.cache.size) return;
 
-  const kadroChannel = newMember.guild.channels.cache.get(CONFIG.KADRO_PANEL_CHANNEL_ID);
-  if (!kadroChannel) return;
+  // Eğer bekleyen bir güncelleme isteği varsa sayacı sıfırla
+  if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
 
-  try {
-    await newMember.guild.members.fetch();
+  // Rol değişikliklerini 5 saniye boyunca bekletip toplu günceller (Rate-limit önlemi)
+  kadroUpdateTimeout = setTimeout(async () => {
+    const kadroChannel = newMember.guild.channels.cache.get(CONFIG.KADRO_PANEL_CHANNEL_ID);
+    if (!kadroChannel) return;
 
-    // Görsellerdeki tam kategori ve rol sırası
-    const categories = [
-      {
-        title: '👑 YÖNETİM KADROSU',
-        roles: [
-          { id: CONFIG.ROLES.BASHEKIM, label: 'Başhekim' },
-          { id: CONFIG.ROLES.BASHEKIM_YARDIMCISI, label: 'Başhekim Yardımcısı' },
-          { id: CONFIG.ROLES.KURUL_UYESI, label: 'Kurul Üyesi' }
-        ]
-      },
-      {
-        title: '🩺 DAHİLİ TIP BİLİMLERİ',
-        roles: [
-          { id: CONFIG.ROLES.DAHILIYE, label: 'Dahiliye' },
-          { id: CONFIG.ROLES.KARDIYOLOJI, label: 'Kardiyoloji' },
-          { id: CONFIG.ROLES.GOGUS_HASTALIKLARI, label: 'Göğüs Hastalıkları' },
-          { id: CONFIG.ROLES.NOROLOJI, label: 'Nöroloji' },
-          { id: CONFIG.ROLES.COCUK_SAGLIGI, label: 'Çocuk Sağlığı ve Hastalıkları' },
-          { id: CONFIG.ROLES.FT_REHABILITASYON, label: 'Fiziksel Tıp ve Rehabilitasyon' },
-          { id: CONFIG.ROLES.CILDIYE, label: 'Cildiye' },
-          { id: CONFIG.ROLES.PSIKIYATRI, label: 'Psikiyatri' },
-          { id: CONFIG.ROLES.GASTROENTEROLOJI, label: 'Gastroenteroloji' }
-        ]
-      },
-      {
-        title: '🔪 CERRAHİ TIP BİLİMLERİ',
-        roles: [
-          { id: CONFIG.ROLES.CERRAHI, label: 'Cerrahi' },
-          { id: CONFIG.ROLES.GENEL_CERRAHI, label: 'Genel Cerrahi' },
-          { id: CONFIG.ROLES.KADIN_DOGUM, label: 'Kadın Hastalıkları ve Doğum' },
-          { id: CONFIG.ROLES.GOZ_HASTALIKLARI, label: 'Göz Hastalıkları' },
-          { id: CONFIG.ROLES.KBB, label: 'Kulak Burun Boğaz' },
-          { id: CONFIG.ROLES.ORTOPEDI, label: 'Ortopedi ve Travmatoloji' },
-          { id: CONFIG.ROLES.UROLOJI, label: 'Üroloji' },
-          { id: CONFIG.ROLES.BEYIN_SINIR_CERRAHISI, label: 'Beyin ve Sinir Cerrahisi' },
-          { id: CONFIG.ROLES.KALP_DAMAR_CERRAHISI, label: 'Kalp ve Damar Cerrahisi' },
-          { id: CONFIG.ROLES.GOGUS_CERRAHISI, label: 'Göğüs Cerrahisi' },
-          { id: CONFIG.ROLES.PLASTIK_CERRAHI, label: 'Plastik, Rekonstrüktif ve Estetik Cerrahi' },
-          { id: CONFIG.ROLES.COCUK_CERRAHISI, label: 'Çocuk Cerrahisi' }
-        ]
-      },
-      {
-        title: '👨‍⚕️ HEKİM UNVAN KADROSU',
-        roles: [
-          { id: CONFIG.ROLES.PROF_DR, label: 'Prof. Dr.' },
-          { id: CONFIG.ROLES.DOC_DR, label: 'Doç. Dr.' },
-          { id: CONFIG.ROLES.UZMAN_DOKTOR, label: 'Uzman Doktor' },
-          { id: CONFIG.ROLES.DOKTOR, label: 'Doktor' },
-          { id: CONFIG.ROLES.ASISTAN_DOKTOR, label: 'Asistan Doktor' }
-        ]
-      },
-      {
-        title: '🚑 SAĞLIK PERSONELİ & DESTEK BİRİMLERİ',
-        roles: [
-          { id: CONFIG.ROLES.HEMSIRE, label: 'Hemşire' },
-          { id: CONFIG.ROLES.ACIL_YOGUN_BAKIM_ANESTEZI, label: 'Acil, Yoğun Bakım ve Anestezi' },
-          { id: CONFIG.ROLES.ATT, label: 'Acil Tıp Teknisyeni' },
-          { id: CONFIG.ROLES.ANESTEZIYOLOJI_REANIMASYON, label: 'Anesteziyoloji ve Reanimasyon' },
-          { id: CONFIG.ROLES.YOGUN_BAKIM_HEMSIRESI, label: 'Yoğun Bakım Hemşiresi' },
-          { id: CONFIG.ROLES.TANI_DESTEK_BIRIMLERI, label: 'Tanı ve Destek Birimleri' },
-          { id: CONFIG.ROLES.RADYOLOJI, label: 'Radyoloji' },
-          { id: CONFIG.ROLES.SORUMLU_PARAMEDIK, label: 'Sorumlu Paramedik' },
-          { id: CONFIG.ROLES.PARAMEDIK, label: 'Paramedik' }
-        ]
-      }
-    ];
+    try {
+      await newMember.guild.members.fetch();
 
-    let embedDescription = '';
+      const categories = [
+        {
+          title: '👑 YÖNETİM KADROSU',
+          roles: [
+            { id: CONFIG.ROLES.BASHEKIM, label: 'Başhekim' },
+            { id: CONFIG.ROLES.BASHEKIM_YARDIMCISI, label: 'Başhekim Yardımcısı' },
+            { id: CONFIG.ROLES.KURUL_UYESI, label: 'Kurul Üyesi' }
+          ]
+        },
+        {
+          title: '🩺 DAHİLİ TIP BİLİMLERİ',
+          roles: [
+            { id: CONFIG.ROLES.DAHILIYE, label: 'Dahiliye' },
+            { id: CONFIG.ROLES.KARDIYOLOJI, label: 'Kardiyoloji' },
+            { id: CONFIG.ROLES.GOGUS_HASTALIKLARI, label: 'Göğüs Hastalıkları' },
+            { id: CONFIG.ROLES.NOROLOJI, label: 'Nöroloji' },
+            { id: CONFIG.ROLES.COCUK_SAGLIGI, label: 'Çocuk Sağlığı ve Hastalıkları' },
+            { id: CONFIG.ROLES.FT_REHABILITASYON, label: 'Fiziksel Tıp ve Rehabilitasyon' },
+            { id: CONFIG.ROLES.CILDIYE, label: 'Cildiye' },
+            { id: CONFIG.ROLES.PSIKIYATRI, label: 'Psikiyatri' },
+            { id: CONFIG.ROLES.GASTROENTEROLOJI, label: 'Gastroenteroloji' }
+          ]
+        },
+        {
+          title: '🔪 CERRAHİ TIP BİLİMLERİ',
+          roles: [
+            { id: CONFIG.ROLES.CERRAHI, label: 'Cerrahi' },
+            { id: CONFIG.ROLES.GENEL_CERRAHI, label: 'Genel Cerrahi' },
+            { id: CONFIG.ROLES.KADIN_DOGUM, label: 'Kadın Hastalıkları ve Doğum' },
+            { id: CONFIG.ROLES.GOZ_HASTALIKLARI, label: 'Göz Hastalıkları' },
+            { id: CONFIG.ROLES.KBB, label: 'Kulak Burun Boğaz' },
+            { id: CONFIG.ROLES.ORTOPEDI, label: 'Ortopedi ve Travmatoloji' },
+            { id: CONFIG.ROLES.UROLOJI, label: 'Üroloji' },
+            { id: CONFIG.ROLES.BEYIN_SINIR_CERRAHISI, label: 'Beyin ve Sinir Cerrahisi' },
+            { id: CONFIG.ROLES.KALP_DAMAR_CERRAHISI, label: 'Kalp ve Damar Cerrahisi' },
+            { id: CONFIG.ROLES.GOGUS_CERRAHISI, label: 'Göğüs Cerrahisi' },
+            { id: CONFIG.ROLES.PLASTIK_CERRAHI, label: 'Plastik, Rekonstrüktif ve Estetik Cerrahi' },
+            { id: CONFIG.ROLES.COCUK_CERRAHISI, label: 'Çocuk Cerrahisi' }
+          ]
+        },
+        {
+          title: '👨‍⚕️ HEKİM UNVAN KADROSU',
+          roles: [
+            { id: CONFIG.ROLES.PROF_DR, label: 'Prof. Dr.' },
+            { id: CONFIG.ROLES.DOC_DR, label: 'Doç. Dr.' },
+            { id: CONFIG.ROLES.UZMAN_DOKTOR, label: 'Uzman Doktor' },
+            { id: CONFIG.ROLES.DOKTOR, label: 'Doktor' },
+            { id: CONFIG.ROLES.ASISTAN_DOKTOR, label: 'Asistan Doktor' }
+          ]
+        },
+        {
+          title: '🚑 SAĞLIK PERSONELİ & DESTEK BİRİMLERİ',
+          roles: [
+            { id: CONFIG.ROLES.HEMSIRE, label: 'Hemşire' },
+            { id: CONFIG.ROLES.ACIL_YOGUN_BAKIM_ANESTEZI, label: 'Acil, Yoğun Bakım ve Anestezi' },
+            { id: CONFIG.ROLES.ATT, label: 'Acil Tıp Teknisyeni' },
+            { id: CONFIG.ROLES.ANESTEZIYOLOJI_REANIMASYON, label: 'Anesteziyoloji ve Reanimasyon' },
+            { id: CONFIG.ROLES.YOGUN_BAKIM_HEMSIRESI, label: 'Yoğun Bakım Hemşiresi' },
+            { id: CONFIG.ROLES.TANI_DESTEK_BIRIMLERI, label: 'Tanı ve Destek Birimleri' },
+            { id: CONFIG.ROLES.RADYOLOJI, label: 'Radyoloji' },
+            { id: CONFIG.ROLES.SORUMLU_PARAMEDIK, label: 'Sorumlu Paramedik' },
+            { id: CONFIG.ROLES.PARAMEDIK, label: 'Paramedik' }
+          ]
+        }
+      ];
 
-    categories.forEach(cat => {
-      let categoryContent = '';
-      cat.roles.forEach(roleObj => {
-        const membersWithRole = newMember.guild.members.cache.filter(m => m.roles.cache.has(roleObj.id));
-        if (membersWithRole.size > 0) {
-          const names = membersWithRole.map(m => m.displayName).join(', ');
-          categoryContent += `• **${roleObj.label}:** ${names}\n`;
+      let embedDescription = '';
+
+      categories.forEach(cat => {
+        let categoryContent = '';
+        cat.roles.forEach(roleObj => {
+          const membersWithRole = newMember.guild.members.cache.filter(m => m.roles.cache.has(roleObj.id));
+          if (membersWithRole.size > 0) {
+            const names = membersWithRole.map(m => m.displayName).join(', ');
+            categoryContent += `• **${roleObj.label}:** ${names}\n`;
+          }
+        });
+
+        if (categoryContent.length > 0) {
+          embedDescription += `\n**${cat.title}**\n${categoryContent}`;
         }
       });
 
-      if (categoryContent.length > 0) {
-        embedDescription += `\n**${cat.title}**\n${categoryContent}`;
+      if (!embedDescription) {
+        embedDescription = 'Henüz kadroda aktif kayıtlı personel bulunmamaktadır.';
       }
-    });
 
-    if (!embedDescription) {
-      embedDescription = 'Henüz kadroda aktif kayıtlı personel bulunmamaktadır.';
+      const kadroEmbed = new EmbedBuilder()
+        .setTitle('🚑 EMS HASTANE KADROSU')
+        .setColor('#ff0000')
+        .setDescription(embedDescription)
+        .setImage(CONFIG.IMAGE_URL)
+        .setTimestamp();
+
+      const fetchedMessages = await kadroChannel.messages.fetch({ limit: 10 });
+      const lastBotMessage = fetchedMessages.find(m => m.author.id === client.user.id);
+
+      if (lastBotMessage) {
+        await lastBotMessage.edit({ embeds: [kadroEmbed] });
+      } else {
+        await kadroChannel.send({ embeds: [kadroEmbed] });
+      }
+
+    } catch (err) {
+      console.error('Kadro paneli güncellenirken hata oluştu:', err);
     }
-
-    const kadroEmbed = new EmbedBuilder()
-      .setTitle('🚑 EMS HASTANE KADROSU')
-      .setColor('#ff0000')
-      .setDescription(embedDescription)
-      .setImage(CONFIG.IMAGE_URL)
-      .setTimestamp();
-
-    // Kanaldaki botun attığı eski mesajı günceller veya silip baştan atar
-    const fetchedMessages = await kadroChannel.messages.fetch({ limit: 10 });
-    const lastBotMessage = fetchedMessages.find(m => m.author.id === client.user.id);
-
-    if (lastBotMessage) {
-      await lastBotMessage.edit({ embeds: [kadroEmbed] });
-    } else {
-      await kadroChannel.send({ embeds: [kadroEmbed] });
-    }
-
-  } catch (err) {
-    console.error('Kadro paneli güncellenirken hata oluştu:', err);
-  }
+  }, 5000); // Rol verildikten sonra 5 saniye bekleyip tek seferde paneli günceller
 });
 
 // YÖNETİCİ KOMUTLARI (!kur-mesai, !kur-ticket, !mesai-ekle, !mesai-cikar)
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // SADECE YÖNETİCİLER KULLANABİLİR
   if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
   const args = message.content.trim().split(/ +/);
@@ -321,13 +325,12 @@ client.on('interactionCreate', async (interaction) => {
 
   const { customId, user, guild, channel, member } = interaction;
 
-  // --- MESAİ GİRİŞ (1 Saat sonra DM kontrolü dahildir) ---
+  // --- MESAİ GİRİŞ ---
   if (customId === 'btn_mesai_giris') {
     if (activeShifts.has(user.id)) {
       return interaction.reply({ content: 'Zaten aktif bir mesainiz var!', ephemeral: true });
     }
 
-    // Every 1 hour check
     const checkTimer = setInterval(async () => {
       try {
         const confirmRow = new ActionRowBuilder().addComponents(
@@ -351,7 +354,6 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // 30 dakikalık onay bekleme süresi
         const timeoutTimer = setTimeout(async () => {
           if (activeShifts.has(user.id)) {
             const shift = activeShifts.get(user.id);
