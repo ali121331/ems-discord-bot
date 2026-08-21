@@ -21,13 +21,15 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages
   ]
 });
 
 const CONFIG = {
   TOKEN: process.env.TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GD77TF.QVe1dbKUrLiNN4_kZ1iRWP_lQtJE-UJOe_OQ7U',
   VATANDAS_ROLE_ID: '1463553957019521208',
+  HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
   WELCOME_CHANNEL_ID: '1463553957468180700',
   TICKET_CATEGORY_ID: '1540114356329517096',
   IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&'
@@ -70,7 +72,7 @@ client.on('messageCreate', async (message) => {
   // SADECE YÖNETİCİLER KULLANABİLİR
   if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
-  const args = message.content.split(' ');
+  const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
   // 1. Mesai Paneli Kurma
@@ -81,11 +83,12 @@ client.on('messageCreate', async (message) => {
       .setColor('#ff0000')
       .setImage(CONFIG.IMAGE_URL);
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('btn_mesai_giris').setLabel('Mesai Giriş').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('btn_mesai_cikis').setLabel('Mesai Çıkış').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('btn_toplam_mesai').setLabel('Toplam Mesailerim').setStyle(ButtonStyle.Secondary)
-    );
+    const btnGiris = new ButtonBuilder().setCustomId('btn_mesai_giris').setLabel('Mesai Giriş').setStyle(ButtonStyle.Success);
+    const btnCikis = new ButtonBuilder().setCustomId('btn_mesai_cikis').setLabel('Mesai Çıkış').setStyle(ButtonStyle.Danger);
+    const btnToplam = new ButtonBuilder().setCustomId('btn_toplam_mesai').setLabel('Toplam Mesailerim').setStyle(ButtonStyle.Secondary);
+    const btnTümMesailer = new ButtonBuilder().setCustomId('btn_tum_mesailer').setLabel('Tüm Personel Mesaileri').setStyle(ButtonStyle.Secondary);
+
+    const row = new ActionRowBuilder().addComponents(btnGiris, btnCikis, btnToplam, btnTümMesailer);
 
     await message.channel.send({ embeds: [embed], components: [row] });
     try { await message.delete(); } catch (e) {}
@@ -98,9 +101,8 @@ client.on('messageCreate', async (message) => {
       .setDescription('Yetkililerle iletişime geçmek için aşağıdaki butona tıklayarak talep oluşturabilirsiniz.')
       .setColor('#00ff00');
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('btn_ticket_ac').setLabel('Ticket Oluştur').setStyle(ButtonStyle.Primary)
-    );
+    const btnTicket = new ButtonBuilder().setCustomId('btn_ticket_ac').setLabel('Ticket Oluştur').setStyle(ButtonStyle.Primary);
+    const row = new ActionRowBuilder().addComponents(btnTicket);
 
     await message.channel.send({ embeds: [embed], components: [row] });
     try { await message.delete(); } catch (e) {}
@@ -140,11 +142,11 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-// HERKESİN KULLANABİLDİĞİ BUTON ETKİLEŞİMLERİ
+// BUTON ETKİLEŞİMLERİ
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  const { customId, user, guild, channel } = interaction;
+  const { customId, user, guild, channel, member } = interaction;
 
   // --- MESAİ GİRİŞ ---
   if (customId === 'btn_mesai_giris') {
@@ -158,11 +160,26 @@ client.on('interactionCreate', async (interaction) => {
           new ButtonBuilder().setCustomId('btn_mesai_devam').setLabel('Evet, Mesaideyim').setStyle(ButtonStyle.Primary)
         );
 
-        const checkMsg = await channel.send({
-          content: `${user} ⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
-          components: [confirmRow]
-        });
+        let dmSent = true;
+        let targetDestination = user;
 
+        // Önce DM atmayı dener, DM kapalıysa kanala atar
+        try {
+          await user.send({
+            content: `⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+            components: [confirmRow]
+          });
+        } catch (dmErr) {
+          dmSent = false;
+          if (channel) {
+            await channel.send({
+              content: `${user} (DM Kutunuz kapalı olduğu için buradan bildirildi)\n⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+              components: [confirmRow]
+            });
+          }
+        }
+
+        // 30 dakikalık onay bekleme süresi
         const timeoutTimer = setTimeout(async () => {
           if (activeShifts.has(user.id)) {
             const shift = activeShifts.get(user.id);
@@ -174,8 +191,15 @@ client.on('interactionCreate', async (interaction) => {
 
             activeShifts.delete(user.id);
 
-            await channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
-            try { await checkMsg.delete(); } catch (e) {}
+            // DM'den bilgi mesajı
+            try {
+              await user.send(`🛑 30 dakika boyunca yanıt vermediğiniz için mesainiz otomatik olarak sonlandırıldı.`);
+            } catch (e) {}
+
+            // Kanala bilgi mesajı
+            if (channel) {
+              await channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
+            }
           }
         }, 30 * 60 * 1000);
 
@@ -183,7 +207,7 @@ client.on('interactionCreate', async (interaction) => {
         if (currentShift) currentShift.timeoutTimer = timeoutTimer;
 
       } catch (err) {
-        console.error('Mesai kontrol mesajı gönderilemedi:', err);
+        console.error('Mesai kontrol işlemi sırasında hata:', err);
       }
     }, 60 * 60 * 1000);
 
@@ -193,10 +217,10 @@ client.on('interactionCreate', async (interaction) => {
       timeoutTimer: null
     });
 
-    return interaction.reply({ content: '✅ **Mesaiye giriş yapıldı.** İyi çalışmalar!', ephemeral: true });
+    return interaction.reply({ content: '✅ **Mesaiye giriş yapıldı.** İyi çalışmalar! Kontroller DM üzerinden sağlanacaktır.', ephemeral: true });
   }
 
-  // --- MESAİ DEVAM ONAYI ---
+  // --- MESAİ DEVAM ONAYI (DM veya Kanaldaki Butondan) ---
   if (customId === 'btn_mesai_devam') {
     const shift = activeShifts.get(user.id);
     if (!shift) {
@@ -208,8 +232,7 @@ client.on('interactionCreate', async (interaction) => {
       shift.timeoutTimer = null;
     }
 
-    await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!', ephemeral: true });
-    try { await interaction.message.delete(); } catch (e) {}
+    await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!' });
   }
 
   // --- MESAİ ÇIKIŞ ---
@@ -257,6 +280,54 @@ client.on('interactionCreate', async (interaction) => {
     });
   }
 
+  // --- TÜM PERSONEL MESAİLERİ ---
+  if (customId === 'btn_tum_mesailer') {
+    const hasRole = member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || member?.permissions?.has(PermissionFlagsBits.Administrator);
+
+    if (!hasRole) {
+      return interaction.reply({
+        content: '❌ **Bu işlem için Hastane Personeli yetkisine sahip olmalısınız!**',
+        ephemeral: true
+      });
+    }
+
+    const allUserIds = new Set([...totalShifts.keys(), ...activeShifts.keys()]);
+
+    if (allUserIds.size === 0) {
+      return interaction.reply({
+        content: '📋 Henüz sistemde kayıtlı hiçbir mesai verisi bulunmuyor.',
+        ephemeral: true
+      });
+    }
+
+    let description = '';
+
+    for (const userId of allUserIds) {
+      let accumulatedMs = totalShifts.get(userId) || 0;
+      const isCurrentlyActive = activeShifts.has(userId);
+
+      if (isCurrentlyActive) {
+        const shift = activeShifts.get(userId);
+        accumulatedMs += (Date.now() - shift.startTime);
+      }
+
+      const totalMinutes = Math.floor(accumulatedMs / 60000);
+      const totalHours = Math.floor(totalMinutes / 60);
+      const remainingMinutes = totalMinutes % 60;
+
+      const statusText = isCurrentlyActive ? '🟢 *(Şu an mesaide)*' : '🔴 *(Mesaide değil)*';
+      description += `<@${userId}> — **${totalHours} saat ${remainingMinutes} dakika** ${statusText}\n`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('📋 Tüm Personel Mesai Listesi')
+      .setDescription(description)
+      .setColor('#0099ff')
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
   // --- TİCKET OLUŞTURMA ---
   if (customId === 'btn_ticket_ac') {
     const channelName = `ticket-${user.username}`;
@@ -276,9 +347,8 @@ client.on('interactionCreate', async (interaction) => {
       ]
     });
 
-    const closeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('btn_ticket_kapat').setLabel('Ticket Kapat').setStyle(ButtonStyle.Danger)
-    );
+    const closeBtn = new ButtonBuilder().setCustomId('btn_ticket_kapat').setLabel('Ticket Kapat').setStyle(ButtonStyle.Danger);
+    const closeRow = new ActionRowBuilder().addComponents(closeBtn);
 
     await ticketChannel.send({ 
       content: `Merhaba ${user}, yetkililer kısa süre içinde sizinle ilgilenecektir.`, 
