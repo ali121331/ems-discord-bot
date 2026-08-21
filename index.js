@@ -38,6 +38,7 @@ const CONFIG = {
   KADRO_PANEL_CHANNEL_ID: '1540107816285511742',
   TEDAVI_UCRET_CHANNEL_ID: '1540107777752563793',
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
+  NAME_CHANGE_CHANNEL_ID: '1540108109433933905', // Otomatik isim değiştirme kanalı
   
   // MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_CHANNEL_ID: '1540109672625733642',
@@ -269,7 +270,7 @@ client.on('guildMemberAdd', async (member) => {
 
 // OTOMATİK KADRO PANELİ GÜNCELLEME (DEBOUNCE)
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  if (oldMember.roles.cache.size === newMember.roles.cache.size) return;
+  if (oldMember.roles.cache.size === newMember.roles.cache.size && oldMember.displayName === newMember.displayName) return;
 
   if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
 
@@ -340,7 +341,41 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  // --- 2. OTOMATİK İSİM DEĞİŞTİRME KANALI ---
+  if (message.channel.id === CONFIG.NAME_CHANGE_CHANNEL_ID) {
+    const newName = message.content.trim();
+
+    if (newName.length > 32) {
+      const infoMsg = await message.reply('❌ **İsim 32 karakterden uzun olamaz.**');
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        infoMsg.delete().catch(() => {});
+      }, 5000);
+      return;
+    }
+
+    try {
+      await message.member.setNickname(newName);
+      const successMsg = await message.channel.send(`✅ ${message.author}, sunucudaki isminiz başarıyla **"${newName}"** olarak güncellendi.`);
+      
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        successMsg.delete().catch(() => {});
+      }, 5000);
+
+    } catch (err) {
+      console.error('İsim değiştirme hatası:', err);
+      const errorMsg = await message.channel.send(`❌ ${message.author}, isminiz değiştirilemedi! *(Yetki hiyerarşisi nedeniyle Sunucu Sahibi veya üst yetkililerin ismi bot tarafından değiştirilemez.)*`);
+      
+      setTimeout(() => {
+        message.delete().catch(() => {});
+        errorMsg.delete().catch(() => {});
+      }, 7000);
+    }
+    return;
+  }
+
+  // --- 3. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
@@ -386,7 +421,7 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
+  // --- 4. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
 
@@ -773,7 +808,7 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!' });
   }
 
-  // --- MESAİ ÇIKIŞ ---
+  // --- MESAİ ÇİKİŞ ---
   if (customId === 'btn_mesai_cikis') {
     if (!activeShifts.has(user.id)) {
       return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor!', ephemeral: true });
