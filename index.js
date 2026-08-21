@@ -101,10 +101,6 @@ const userInvoices = new Map();
 const userInvoiceCounts = new Map(); 
 let kadroUpdateTimeout = null;
 
-// Mazeret Bildirim Deposu (Senkronize Yönetim İçin)
-const activeMazeretReplies = new Map(); 
-const mazeretRecords = new Map(); 
-
 const SALARY_CONFIG = {
   HOURLY_RATE: 100,      
   INVOICE_PERCENT: 10    
@@ -345,119 +341,11 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
   }, 2000);
 });
 
-// KANAL VE DM MESAJLARI DİNLEME
+// KANAL VE MESAJ DİNLEME
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot || !message.guild) return;
 
-  // --- 1. DM CEVAPLAMA SİSTEMİ ---
-  if (!message.guild) {
-    const activeData = activeMazeretReplies.get(message.author.id);
-    if (!activeData) {
-      return message.reply('❌ Yanıtlamak istediğiniz aktif bir mazeret bildirimi bulunamadı veya süre doldu. Lütfen Discord sunucusundaki buton üzerinden işlemi başlatınız.');
-    }
-
-    try {
-      let targetGuild = client.guilds.cache.get(activeData.guildId);
-      if (!targetGuild) {
-        targetGuild = await client.guilds.fetch(activeData.guildId);
-      }
-      
-      const targetMember = await targetGuild.members.fetch(activeData.studentId);
-      const record = mazeretRecords.get(activeData.mazeretId);
-
-      if (record && record.status !== 'pending') {
-        activeMazeretReplies.delete(message.author.id);
-        return message.reply('⚠️ **Bu mazeret daha önce zaten yanıtlanmıştır!**');
-      }
-
-      const mazeretChannel = targetGuild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID);
-
-      if (activeData.action === 'approve') {
-        const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
-        if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
-          await targetMember.roles.add(izinliRole);
-        }
-
-        if (record) record.status = 'approved';
-
-        const userDmEmbed = new EmbedBuilder()
-          .setTitle('📑 Ders Mazeret Bildiriminiz Onaylandı')
-          .setColor('#00ff00')
-          .addFields(
-            { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
-            { name: 'Yanıtlanan Yer', value: '💬 Akademi Sorumlusu DM', inline: true },
-            { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false },
-            { name: 'Sorumlu Notu / Açıklama', value: message.content || 'Bir açıklama belirtilmedi.' }
-          )
-          .setTimestamp();
-
-        await targetMember.send({ embeds: [userDmEmbed] });
-        await message.reply(`✅ **Onay yanıtınız iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Açıklama:** ${message.content}\n• **İzin Rolü:** Tanımlandı.`);
-
-        if (mazeretChannel && record && record.channelMsgId) {
-          try {
-            const channelMsg = await mazeretChannel.messages.fetch(record.channelMsgId);
-            const updatedEmbed = EmbedBuilder.from(channelMsg.embeds[0])
-              .setColor('#00ff00')
-              .addFields(
-                { name: '⚡ Durum', value: `✅ **DM ÜZERİNDEN ONAYLANDI** (${message.author.tag})`, inline: false },
-                { name: 'Sorumlu Notu', value: message.content || 'Açıklama girilmedi.' }
-              );
-
-            const disabledRow = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('disabled_1').setLabel('✅ DM Üzerinden Onaylandı').setStyle(ButtonStyle.Success).setDisabled(true)
-            );
-
-            await channelMsg.edit({ embeds: [updatedEmbed], components: [disabledRow] });
-          } catch (e) {}
-        }
-
-      } else if (activeData.action === 'reject') {
-        if (record) record.status = 'rejected';
-
-        const userDmEmbed = new EmbedBuilder()
-          .setTitle('📑 Ders Mazeret Bildiriminiz Reddedildi')
-          .setColor('#ff0000')
-          .addFields(
-            { name: 'Yetkili / Sorumlu', value: `${message.author.tag}`, inline: true },
-            { name: 'Yanıtlanan Yer', value: '💬 Akademi Sorumlusu DM', inline: true },
-            { name: 'Verilen Karar', value: '❌ Mazeretiniz Reddedildi', inline: false },
-            { name: 'Red Sebebi / Not', value: message.content || 'Bir sebep belirtilmedi.' }
-          )
-          .setTimestamp();
-
-        await targetMember.send({ embeds: [userDmEmbed] });
-        await message.reply(`🛑 **Red yanıtınız iletildi!**\n• **Personel:** ${targetMember.user.tag}\n• **Red Sebebi:** ${message.content}`);
-
-        if (mazeretChannel && record && record.channelMsgId) {
-          try {
-            const channelMsg = await mazeretChannel.messages.fetch(record.channelMsgId);
-            const updatedEmbed = EmbedBuilder.from(channelMsg.embeds[0])
-              .setColor('#ff0000')
-              .addFields(
-                { name: '⚡ Durum', value: `❌ **DM ÜZERİNDEN REDDEDİLDİ** (${message.author.tag})`, inline: false },
-                { name: 'Red Sebebi', value: message.content || 'Açıklama girilmedi.' }
-              );
-
-            const disabledRow = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('disabled_2').setLabel('❌ DM Üzerinden Reddedildi').setStyle(ButtonStyle.Danger).setDisabled(true)
-            );
-
-            await channelMsg.edit({ embeds: [updatedEmbed], components: [disabledRow] });
-          } catch (e) {}
-        }
-      }
-
-      activeMazeretReplies.delete(message.author.id);
-
-    } catch (err) {
-      console.error('DM yanıtı gönderilirken hata oluştu:', err);
-      await message.reply('❌ Mesaj iletilirken veya rol verilirken bir hata oluştu. Kullanıcının DM kutusu kapalı olabilir.');
-    }
-    return;
-  }
-
-  // --- 2. OTOMATİK İSİM DEĞİŞTİRME KANALI ---
+  // --- 1. OTOMATİK İSİM DEĞİŞTİRME KANALI ---
   if (message.channel.id === CONFIG.NAME_CHANGE_CHANNEL_ID) {
     const newName = message.content.trim();
 
@@ -491,10 +379,8 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 3. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
-    const mazeretId = `mazeret_${Date.now()}`;
-
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
       .setColor('#ff9900')
@@ -511,50 +397,27 @@ client.on('messageCreate', async (message) => {
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`btn_mazeret_onay_${message.author.id}_${message.guild.id}_${mazeretId}`)
+        .setCustomId(`btn_mazeret_onay_${message.author.id}`)
         .setLabel('Onayla & İzin Ver')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`btn_mazeret_red_${message.author.id}_${message.guild.id}_${mazeretId}`)
+        .setCustomId(`btn_mazeret_red_${message.author.id}`)
         .setLabel('Mazereti Reddet')
         .setStyle(ButtonStyle.Danger)
     );
 
-    // 1. Mazeret Kanalına Bildirim Düştü
-    const channelSentMsg = await message.channel.send({
-      content: `📌 **Yeni Mazeret Bildirimi Düştü:** ${message.author}`,
+    // Doğrudan Mazeret Kanalına İletilir
+    await message.channel.send({
+      content: `📌 <@&${CONFIG.AKADEMI_SORUMLUSU_ROLE_ID}> **Yeni Mazeret Bildirimi:** ${message.author}`,
       embeds: [mazeretEmbed],
       components: [row]
-    });
-
-    mazeretRecords.set(mazeretId, {
-      studentId: message.author.id,
-      guildId: message.guild.id,
-      channelMsgId: channelSentMsg.id,
-      status: 'pending'
-    });
-
-    // 2. Akademi Sorumlularına DM İletildi
-    await message.guild.members.fetch();
-    const membersWithAkademiRole = message.guild.members.cache.filter(m => m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID));
-
-    membersWithAkademiRole.forEach(async (sorumlu) => {
-      try {
-        await sorumlu.send({
-          content: `🔔 **Akademi Sorumlusu:** <@${message.author.id}> tarafından yeni bir ders mazereti bildirildi! *(İster buradan ister mazeret kanalından yanıtlayabilirsiniz)*`,
-          embeds: [mazeretEmbed],
-          components: [row]
-        });
-      } catch (e) {
-        console.log(`${sorumlu.user.tag} kullanıcısının DM'i kapalı.`);
-      }
     });
 
     try { await message.delete(); } catch (err) {}
     return;
   }
 
-  // --- 4. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
+  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
 
@@ -640,7 +503,7 @@ client.on('messageCreate', async (message) => {
         `Katılamayacağı Ders / Saat: \n` +
         `Mazeret / Katılamama Sebebi: \n` +
         `\`\`\`\n` +
-        `⚠️ *Attığınız mesajlar doğrudan bu kanala ve Akademi Sorumlularına iletilecek, yanıtlandığında onay/red durumu hem kanala yansıyacak hem de DM üzerinden bildirilecektir.*`
+        `⚠️ *Attığınız mazeret bildirimleri Akademi Sorumluları tarafından bu kanaldan incelenerek onaylanacak veya reddedilecektir.*`
       )
       .setImage(CONFIG.IMAGE_URL)
       .setTimestamp();
@@ -843,113 +706,84 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  const { customId, user, guild, channel, member, message } = interaction;
+  const { customId, user, guild, member, message } = interaction;
 
   // --- AKADEMİ SORUMLUSU ONAY / RED BUTONLARI ---
   if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
-    const parts = customId.split('_');
-    const actionType = parts[2]; // 'onay' veya 'red'
-    const studentId = parts[3];
-    const guildId = parts[4];
-    const mazeretId = parts[5];
+    const isAkademiSorumlusu = member?.roles?.cache?.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || member?.permissions?.has(PermissionFlagsBits.Administrator);
 
-    const record = mazeretRecords.get(mazeretId);
-
-    if (record && record.status !== 'pending') {
+    if (!isAkademiSorumlusu) {
       return interaction.reply({
-        content: '⚠️ **Bu mazeret talebi zaten başka bir yetkili tarafından yanıtlanmış veya işleme alınmıştır!**',
+        content: '❌ **Mazeret taleplerini yalnızca Akademi Sorumluları ve Yöneticiler yanıtlayabilir!**',
         ephemeral: true
       });
     }
 
-    // DM ÜZERİNDEN TIKLANDI
-    if (!guild) {
-      activeMazeretReplies.set(user.id, {
-        studentId: studentId,
-        guildId: guildId,
-        mazeretId: mazeretId,
-        action: actionType === 'onay' ? 'approve' : 'reject'
-      });
+    const parts = customId.split('_');
+    const actionType = parts[2]; 
+    const studentId = parts[3];
 
-      return interaction.reply({
-        content: actionType === 'onay' 
-          ? '🟢 **Mazeret ONAY süreci başlatıldı.**\nLütfen onay gerekçenizi / notunuzu buraya yazıp gönderin. Kişiye izinli rolü otomatik verilecek ve mazeret kanalına bilgi düşecektir.' 
-          : '🔴 **Mazeret RED süreci başlatıldı.**\nLütfen red sebebinizi buraya yazıp gönderin. İlgili kanallara iletilecektir.',
-        ephemeral: false
-      });
-    } 
+    try {
+      const targetMember = await guild.members.fetch(studentId);
 
-    // KANAL ÜZERİNDEN TIKLANDI
-    else {
-      try {
-        let targetGuild = guild;
-        const targetMember = await targetGuild.members.fetch(studentId);
-
-        if (actionType === 'onay') {
-          const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
-          if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
-            await targetMember.roles.add(izinliRole);
-          }
-
-          if (record) record.status = 'approved';
-
-          const userDmEmbed = new EmbedBuilder()
-            .setTitle('📑 Ders Mazeret Bildiriminiz Onaylandı')
-            .setColor('#00ff00')
-            .addFields(
-              { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
-              { name: 'Yanıtlanan Yer', value: '📌 Mazeret Bildirim Kanalı', inline: true },
-              { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false }
-            )
-            .setTimestamp();
-
-          await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
-
-          const updatedEmbed = EmbedBuilder.from(message.embeds[0])
-            .setColor('#00ff00')
-            .addFields(
-              { name: '⚡ Durum', value: `✅ **KANAL ÜZERİNDEN ONAYLANDI** (${user.tag})`, inline: false }
-            );
-
-          const disabledRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('disabled_1').setLabel('✅ Kanal Üzerinden Onaylandı').setStyle(ButtonStyle.Success).setDisabled(true)
-          );
-
-          await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
-
-        } else if (actionType === 'red') {
-          if (record) record.status = 'rejected';
-
-          const userDmEmbed = new EmbedBuilder()
-            .setTitle('📑 Ders Mazeret Bildiriminiz Reddedildi')
-            .setColor('#ff0000')
-            .addFields(
-              { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
-              { name: 'Yanıtlanan Yer', value: '📌 Mazeret Bildirim Kanalı', inline: true },
-              { name: 'Verilen Karar', value: '❌ Mazeretiniz Reddedildi', inline: false }
-            )
-            .setTimestamp();
-
-          await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
-
-          const updatedEmbed = EmbedBuilder.from(message.embeds[0])
-            .setColor('#ff0000')
-            .addFields(
-              { name: '⚡ Durum', value: `❌ **KANAL ÜZERİNDEN REDDEDİLDİ** (${user.tag})`, inline: false }
-            );
-
-          const disabledRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('disabled_2').setLabel('❌ Kanal Üzerinden Reddedildi').setStyle(ButtonStyle.Danger).setDisabled(true)
-          );
-
-          await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
+      if (actionType === 'onay') {
+        const izinliRole = guild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
+        if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
+          await targetMember.roles.add(izinliRole);
         }
-      } catch (err) {
-        console.error('Kanal mazeret onaylama hatası:', err);
-        return interaction.reply({ content: '❌ İşlem gerçekleştirilirken hata oluştu.', ephemeral: true });
+
+        const userDmEmbed = new EmbedBuilder()
+          .setTitle('📑 Ders Mazeret Bildiriminiz Onaylandı')
+          .setColor('#00ff00')
+          .addFields(
+            { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
+            { name: 'Verilen Karar', value: '✅ Mazeretiniz Kabul Edildi & İzinli Tanımlandı', inline: false }
+          )
+          .setTimestamp();
+
+        await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
+
+        const updatedEmbed = EmbedBuilder.from(message.embeds[0])
+          .setColor('#00ff00')
+          .addFields(
+            { name: '⚡ Durum', value: `✅ **ONAYLANDI** (${user.tag})`, inline: false }
+          );
+
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('disabled_1').setLabel('✅ Onaylandı').setStyle(ButtonStyle.Success).setDisabled(true)
+        );
+
+        await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
+
+      } else if (actionType === 'red') {
+        const userDmEmbed = new EmbedBuilder()
+          .setTitle('📑 Ders Mazeret Bildiriminiz Reddedildi')
+          .setColor('#ff0000')
+          .addFields(
+            { name: 'Yetkili / Sorumlu', value: `${user.tag}`, inline: true },
+            { name: 'Verilen Karar', value: '❌ Mazeretiniz Reddedildi', inline: false }
+          )
+          .setTimestamp();
+
+        await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
+
+        const updatedEmbed = EmbedBuilder.from(message.embeds[0])
+          .setColor('#ff0000')
+          .addFields(
+            { name: '⚡ Durum', value: `❌ **REDDEDİLDİ** (${user.tag})`, inline: false }
+          );
+
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('disabled_2').setLabel('❌ Reddedildi').setStyle(ButtonStyle.Danger).setDisabled(true)
+        );
+
+        await interaction.update({ embeds: [updatedEmbed], components: [disabledRow] });
       }
-      return;
+    } catch (err) {
+      console.error('Mazeret işlem hatası:', err);
+      return interaction.reply({ content: '❌ İşlem gerçekleştirilirken bir hata oluştu.', ephemeral: true });
     }
+    return;
   }
 
   // --- MESAİ GİRİŞ ---
@@ -970,8 +804,8 @@ client.on('interactionCreate', async (interaction) => {
             components: [confirmRow]
           });
         } catch (dmErr) {
-          if (channel) {
-            await channel.send({
+          if (interaction.channel) {
+            await interaction.channel.send({
               content: `${user} (DM Kutunuz kapalı olduğu için buradan bildirildi)\n⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
               components: [confirmRow]
             });
@@ -993,8 +827,8 @@ client.on('interactionCreate', async (interaction) => {
               await user.send(`🛑 30 dakika boyunca yanıt vermediğiniz için mesainiz otomatik olarak sonlandırıldı.`);
             } catch (e) {}
 
-            if (channel) {
-              await channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
+            if (interaction.channel) {
+              await interaction.channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
             }
           }
         }, 30 * 60 * 1000);
