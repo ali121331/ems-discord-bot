@@ -6,7 +6,6 @@ const {
   ButtonBuilder, 
   ButtonStyle, 
   PermissionFlagsBits, 
-  ChannelType,
   Partials,
   ModalBuilder,
   TextInputBuilder,
@@ -31,7 +30,8 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: 'BOT_TOKENINIZ_BURAYA',
+  // Render / Hosting üzerindeki Environment Variable (DISCORD_TOKEN) üzerinden okur
+  TOKEN: process.env.DISCORD_TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GSrEPH.-kMzYSUFsH6jFQHvM7Miq9Z7kmedvAbGbN2aRU',
   
   // SADECE DOKTORLARIN GÖREBİLECEĞİ VE RANDEVULARIN DÜŞECEĞİ GİZLİ KANAL ID'Sİ
   DOKTOR_RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
@@ -51,7 +51,6 @@ client.on('messageCreate', async (message) => {
   const command = args[0].toLowerCase();
 
   // KULLANICI ID'Sİ İLE DM'E RANDEVU PANELİ GÖNDERME KOMUTU
-  // Kullanım: !randevu-gonder <Kullanıcı_ID>
   if (command === '!randevu-gonder') {
     if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       return message.reply('❌ **Bu komutu kullanmak için yetkiniz bulunmamaktadır.**');
@@ -99,7 +98,6 @@ client.on('messageCreate', async (message) => {
 // --- ETKİLEŞİM DİNLEYİCİSİ (BUTON VE MODAL) ---
 client.on('interactionCreate', async (interaction) => {
 
-  // 1. DM'DEKİ BUTONA TIKLANDIĞINDA AÇILAN MODAL (FORM)
   if (interaction.isButton()) {
     const { customId, user } = interaction;
 
@@ -147,7 +145,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // DOKTOR KANALINDAKİ ONAY/RED BUTONLARI
     if (customId.startsWith('btn_randevu_onay_') || customId.startsWith('btn_randevu_red_')) {
       if (interaction.message && interaction.message.components.length > 0) {
         const firstBtn = interaction.message.components[0].components[0];
@@ -178,11 +175,9 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // 2. FORM GÖNDERİLDİĞİNDE VEYA DOKTOR YANITLADIĞINDA
   if (interaction.isModalSubmit()) {
     const { customId, user } = interaction;
 
-    // SİVİL FORMU GÖNDERDİĞİNDE
     if (customId === 'modal_randevu_formu') {
       const adSoyad = interaction.fields.getTextInputValue('randevu_ad_soyad');
       const brans = interaction.fields.getTextInputValue('randevu_brans');
@@ -214,7 +209,6 @@ client.on('interactionCreate', async (interaction) => {
           .setStyle(ButtonStyle.Danger)
       );
 
-      // TALEP SADECE DOKTOR KANALINA DÜŞER
       const doktorLogChannel = client.channels.cache.get(CONFIG.DOKTOR_RANDEVU_LOG_CHANNEL_ID);
       if (doktorLogChannel) {
         await doktorLogChannel.send({
@@ -230,7 +224,6 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
 
-    // DOKTOR KARAR VERDİĞİNDE
     if (customId.startsWith('modal_randevu_yanit_')) {
       const parts = customId.split('_');
       const actionType = parts[parts.length - 3];
@@ -244,7 +237,6 @@ client.on('interactionCreate', async (interaction) => {
       try {
         const patientUser = await client.users.fetch(patientId);
 
-        // HASTAYA DM BİLDİRİMİ
         const patientDmEmbed = new EmbedBuilder()
           .setTitle(isApproved ? '📅 Randevunuz Onaylandı!' : '❌ Randevu Talebiniz Reddedildi')
           .setColor(color)
@@ -257,7 +249,6 @@ client.on('interactionCreate', async (interaction) => {
 
         await patientUser.send({ embeds: [patientDmEmbed] }).catch(() => {});
 
-        // DOKTOR KANALINDAKİ MESAJI DÜZENLE
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('disabled_randevu_status')
