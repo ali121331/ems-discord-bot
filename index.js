@@ -19,6 +19,15 @@ app.get('/', (req, res) => res.send('EMS Bot 7/24 Aktif!'));
 app.listen(3000, () => console.log('Uptime web sunucusu hazır.'));
 
 // --- BOT YAPILANDIRMASI ---
+const CONFIG = {
+  TOKEN: process.env.TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GD77TF.QVe1dbKUrLiNN4_kZ1iRWP_lQtJE-UJOe_OQ7U',
+  GUILD_ID: '1463553957019521206', // Sunucu ID'niz tanımlandı
+  VATANDAS_ROLE_ID: '1463553957019521208',
+  WELCOME_CHANNEL_ID: '1463553957468180700',
+  TICKET_CATEGORY_ID: '1540114356329517096',
+  IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&'
+};
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -27,14 +36,6 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
-
-const CONFIG = {
-  TOKEN: process.env.TOKEN || 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GD77TF.QVe1dbKUrLiNN4_kZ1iRWP_lQtJE-UJOe_OQ7U',
-  VATANDAS_ROLE_ID: '1463553957019521208',
-  WELCOME_CHANNEL_ID: '1463553957468180700',
-  TICKET_CATEGORY_ID: '1540114356329517096',
-  IMAGE_URL: 'https://cdn.discordapp.com/attachments/1180199538590482514/1540113722423648296/b9fc56e01dcdcce0d228c2271e0b9d0f.png?ex=6a88c62d&is=6a8774ad&hm=bf28ee6d771310a03c1162da6e49190a577dd720c3699289c1df467211dc72b9&'
-};
 
 const activeShifts = new Map();
 const totalShifts = new Map();
@@ -55,30 +56,31 @@ const commands = [
     .setName('mesai-ekle')
     .setDescription('Bir kullanıcının mesai süresine dakika ekler.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addUserOption(opt => opt.setName('kullanici').setDescription('Üye').setRequired(true))
-    .addIntegerOption(opt => opt.setName('dakika').setDescription('Dakika').setRequired(true)),
+    .addUserOption(opt => opt.setName('kullanici').setDescription('Süresi artırılacak üye').setRequired(true))
+    .addIntegerOption(opt => opt.setName('dakika').setDescription('Eklenecek dakika miktarı').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('mesai-cikar')
     .setDescription('Bir kullanıcının mesai süresinden dakika çıkarır.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addUserOption(opt => opt.setName('kullanici').setDescription('Üye').setRequired(true))
-    .addIntegerOption(opt => opt.setName('dakika').setDescription('Dakika').setRequired(true))
+    .addUserOption(opt => opt.setName('kullanici').setDescription('Süresi azaltılacak üye').setRequired(true))
+    .addIntegerOption(opt => opt.setName('dakika').setDescription('Çıkarılacak dakika miktarı').setRequired(true))
 ];
 
+// --- BOT HAZIR OLDUĞUNDA ---
 client.once('ready', async () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
 
   const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
   try {
-    console.log('Slash komutları güncelleniyor...');
+    console.log('Sunucuya özel Slash komutları yükleniyor...');
     await rest.put(
-      Routes.applicationCommands(client.user.id),
+      Routes.applicationGuildCommands(client.user.id, CONFIG.GUILD_ID),
       { body: commands.map(c => c.toJSON()) }
     );
-    console.log('Slash komutları başarıyla kaydedildi!');
+    console.log('✅ Sunucu Slash komutları başarıyla yüklendi!');
   } catch (error) {
-    console.error('Slash komut kayıt hatası:', error);
+    console.error('❌ Slash komut yükleme hatası:', error);
   }
 });
 
@@ -104,13 +106,16 @@ client.on('guildMemberAdd', async (member) => {
   });
 });
 
-// --- INTERACTION HANDLER ---
+// --- ETKİLEŞİM İŞLEYİCİSİ ---
 client.on('interactionCreate', async (interaction) => {
   
+  // SLASH KOMUTLARI
   if (interaction.isChatInputCommand()) {
     const { commandName, options } = interaction;
 
     if (commandName === 'kur-mesai') {
+      await interaction.deferReply({ ephemeral: true });
+
       const embed = new EmbedBuilder()
         .setTitle('🚑 EMS Mesai Takip Paneli')
         .setDescription('Mesai işlemlerinizi ve geçmiş toplam mesai sürenizi aşağıdaki butonlardan yönetebilirsiniz.')
@@ -124,10 +129,12 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.reply({ content: '✅ Mesai paneli başarıyla kuruldu.', ephemeral: true });
+      return interaction.editReply({ content: '✅ Mesai paneli başarıyla kuruldu.' });
     }
 
     if (commandName === 'kur-ticket') {
+      await interaction.deferReply({ ephemeral: true });
+
       const embed = new EmbedBuilder()
         .setTitle('🎫 Destek / Ticket Sistemi')
         .setDescription('Yetkililerle iletişime geçmek için aşağıdaki butona tıklayarak talep oluşturabilirsiniz.')
@@ -138,10 +145,12 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.reply({ content: '✅ Ticket paneli başarıyla kuruldu.', ephemeral: true });
+      return interaction.editReply({ content: '✅ Ticket paneli başarıyla kuruldu.' });
     }
 
     if (commandName === 'mesai-ekle') {
+      await interaction.deferReply({ ephemeral: true });
+
       const targetUser = options.getUser('kullanici');
       const addMinutes = options.getInteger('dakika');
       const addMs = addMinutes * 60 * 1000;
@@ -149,13 +158,14 @@ client.on('interactionCreate', async (interaction) => {
       const currentTotal = totalShifts.get(targetUser.id) || 0;
       totalShifts.set(targetUser.id, currentTotal + addMs);
 
-      return interaction.reply({ 
-        content: `✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.` 
       });
     }
 
     if (commandName === 'mesai-cikar') {
+      await interaction.deferReply({ ephemeral: true });
+
       const targetUser = options.getUser('kullanici');
       const removeMinutes = options.getInteger('dakika');
       const removeMs = removeMinutes * 60 * 1000;
@@ -164,13 +174,13 @@ client.on('interactionCreate', async (interaction) => {
       const newTotal = Math.max(0, currentTotal - removeMs);
       totalShifts.set(targetUser.id, newTotal);
 
-      return interaction.reply({ 
-        content: `🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** düşüldü.`, 
-        ephemeral: true 
+      return interaction.editReply({ 
+        content: `🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** düşüldü.` 
       });
     }
   }
 
+  // BUTON ETKİLEŞİMLERİ
   if (interaction.isButton()) {
     const { customId, user, guild, channel } = interaction;
 
