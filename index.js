@@ -733,6 +733,47 @@ client.on('messageCreate', async (message) => {
 
     return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
   }
+
+  // --- FATURA SIFIRLAMA KOMUTU ---
+  if (command === '!fatura-sıfırla' || command === '!fatura-sifirla') {
+    const targetUser = message.mentions.users.first();
+    const param = args[1]?.toLowerCase();
+
+    if (param === 'hepsi' || param === 'tümü' || param === 'tumu') {
+      userInvoices.clear();
+      userInvoiceCounts.clear();
+      return message.reply('✅ **Tüm kullanıcıların fatura verileri ve sayıları başarıyla sıfırlandı.**');
+    }
+
+    if (targetUser) {
+      userInvoices.delete(targetUser.id);
+      userInvoiceCounts.delete(targetUser.id);
+      return message.reply(`✅ ${targetUser} kullanıcısının tüm fatura verileri başarıyla sıfırlandı.`);
+    }
+
+    return message.reply('❌ **Hatalı kullanım!**\n• Belirli bir üye için: `!fatura-sıfırla @Kullanıcı`\n• Tüm sunucu için: `!fatura-sıfırla hepsi`');
+  }
+
+  // --- FATURA ÇIKARMA / DÜŞME KOMUTU ---
+  if (command === '!fatura-sil' || command === '!fatura-cikar') {
+    const targetUser = message.mentions.users.first();
+    const removeAmount = parseFloat(args[2]);
+
+    if (!targetUser || isNaN(removeAmount) || removeAmount <= 0) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!fatura-sil @Kullanıcı 5000`');
+    }
+
+    const currentAmount = userInvoices.get(targetUser.id) || 0;
+    const currentCount = userInvoiceCounts.get(targetUser.id) || 0;
+
+    const newAmount = Math.max(0, currentAmount - removeAmount);
+    const newCount = Math.max(0, currentCount - 1);
+
+    userInvoices.set(targetUser.id, newAmount);
+    userInvoiceCounts.set(targetUser.id, newCount);
+
+    return message.reply(`✅ ${targetUser} kullanıcısından **$${removeAmount}** tutarında fatura düşüldü.\n• Güncel Fatura Tutarı: **$${newAmount}**\n• Güncel Fatura Adedi: **${newCount}**`);
+  }
 });
 
 // ETKİLEŞİM DİNLEYİCİSİ (BUTONLAR & MODALLAR)
