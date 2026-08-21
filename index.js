@@ -90,13 +90,14 @@ const CONFIG = {
 // Veri depolama
 const activeShifts = new Map();
 const totalShifts = new Map();
-const userInvoices = new Map(); // Kullanıcı bazlı fatura sayıları
+const userInvoices = new Map(); // Kullanıcının kestiği toplam fatura tutarı
+const userInvoiceCounts = new Map(); // Kullanıcının fatura adedi
 let kadroUpdateTimeout = null;
 
-// Dinamik Ücret ve Oran Ayarları (Y: Saatlik Ücret, Z: Fatura Başı Ücret)
+// Dinamik Ücret ve Oran Ayarları (Y: Saatlik Ücret, Z: Fatura Yüzdesi %)
 const SALARY_CONFIG = {
-  HOURLY_RATE: 100, // Y miktarı
-  INVOICE_RATE: 50   // Z miktarı
+  HOURLY_RATE: 100,      // Y miktarı ($)
+  INVOICE_PERCENT: 10    // Z miktarı (%) -> Varsayılan %10
 };
 
 // --- ORTAK KADRO PANELİ OLUŞTURMA FONKSİYONU ---
@@ -258,9 +259,16 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
 
-  // Tedavi Ücret Kanalına Mesaj Atıldığında Otomatik Yönlendirme
+  // Tedavi Ücret Kanalına Mesaj Atıldığında Otomatik Yönlendirme ve Yüzde Hesaplama
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
+
+    // Mesaj içerisindeki tutarı/sayıyı bulma (Örn: 5000$, 5000 TL, 5000)
+    const matches = message.content.match(/\d+/g);
+    let invoiceAmount = 0;
+    if (matches && matches.length > 0) {
+      invoiceAmount = parseFloat(matches[0]); // Bulunan ilk sayıyı tutar kabul et
+    }
 
     if (logChannel) {
       const embed = new EmbedBuilder()
@@ -268,7 +276,7 @@ client.on('messageCreate', async (message) => {
         .setColor('#00ffcc')
         .addFields(
           { name: 'Personel', value: `${message.author} (${message.author.tag})`, inline: true },
-          { name: 'Kanal', value: `${message.channel}`, inline: true },
+          { name: 'Algılanan Fatura Tutarı', value: `$${invoiceAmount}`, inline: true },
           { name: 'İçerik / Detay', value: message.content || 'Görsel/Dosya Gönderildi' }
         )
         .setTimestamp();
@@ -279,9 +287,12 @@ client.on('messageCreate', async (message) => {
 
       await logChannel.send({ embeds: [embed] });
 
-      // Kullanıcının Fatura Sayısını Artır
-      const currentInvoices = userInvoices.get(message.author.id) || 0;
-      userInvoices.set(message.author.id, currentInvoices + 1);
+      // Kullanıcının Fatura Bilgilerini Güncelle
+      const currentAmount = userInvoices.get(message.author.id) || 0;
+      const currentCount = userInvoiceCounts.get(message.author.id) || 0;
+
+      userInvoices.set(message.author.id, currentAmount + invoiceAmount);
+      userInvoiceCounts.set(message.author.id, currentCount + 1);
     }
 
     try {
@@ -362,7 +373,7 @@ client.on('messageCreate', async (message) => {
         '• **Poliklinik Muayene Ücreti:** $X\n' +
         '• **İlaç ve Serum Tedavisi:** $X\n' +
         '• **Radyolojik Görüntüleme / Tahlil:** $X\n\n' +
-        '*(Lütfen kestiğiniz faturaları ve tedavi detaylarını bu kanala yazarak iletiniz.)*')
+        '*(Lütfen kestiğiniz faturaları ve tedavi tutarını bu kanala yazarak iletiniz.)*')
       .setImage(CONFIG.IMAGE_URL)
       .setTimestamp();
 
@@ -370,19 +381,19 @@ client.on('messageCreate', async (message) => {
     try { await message.delete(); } catch (e) {}
   }
 
-  // 5. Saatlik Ücret ve Fatura Yüzdesini / Ücretini Ayarlama (!maas-ayarla <Y> <Z>)
+  // 5. Saatlik Ücret ve Fatura Yüzdesini Ayarlama (!maas-ayarla <Y> <Z>)
   if (command === '!maas-ayarla') {
     const hourly = parseFloat(args[1]);
-    const invoice = parseFloat(args[2]);
+    const percent = parseFloat(args[2]);
 
-    if (isNaN(hourly) || isNaN(invoice)) {
-      return message.reply('❌ **Hatalı kullanım!** Örnek: `!maas-ayarla 100 50` *(100$ saatlik ücret, 50$ fatura başı ücret)*');
+    if (isNaN(hourly) || isNaN(percent)) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!maas-ayarla 100 15` *(100$ saatlik ücret, %15 fatura primi)*');
     }
 
     SALARY_CONFIG.HOURLY_RATE = hourly;
-    SALARY_CONFIG.INVOICE_RATE = invoice;
+    SALARY_CONFIG.INVOICE_PERCENT = percent;
 
-    return message.reply(`✅ **Maaş parametreleri güncellendi!**\n• Saat Başı Ücret (Y): **$${hourly}**\n• Fatura Başı Ücret (Z): **$${invoice}**`);
+    return message.reply(`✅ **Maaş parametreleri güncellendi!**\n• Saat Başı Ücret (Y): **$${hourly}**\n• Fatura Prim Yüzdesi (Z): **%${percent}**`);
   }
 
   // 6. Maaş ve Mesai Hesaplama Komutu (!maas-hesapla @Kullanici)
@@ -396,24 +407,25 @@ client.on('messageCreate', async (message) => {
     }
 
     const totalHours = accumulatedMs / (1000 * 60 * 60);
-    const invoiceCount = userInvoices.get(targetUser.id) || 0;
+    const totalInvoiceAmount = userInvoices.get(targetUser.id) || 0;
+    const invoiceCount = userInvoiceCounts.get(targetUser.id) || 0;
 
     const shiftEarnings = totalHours * SALARY_CONFIG.HOURLY_RATE;
-    const invoiceEarnings = invoiceCount * SALARY_CONFIG.INVOICE_RATE;
+    const invoiceEarnings = (totalInvoiceAmount * SALARY_CONFIG.INVOICE_PERCENT) / 100;
     const totalEarnings = shiftEarnings + invoiceEarnings;
 
     const hours = Math.floor(totalHours);
     const minutes = Math.floor((accumulatedMs % (1000 * 60 * 60)) / (1000 * 60));
 
     const resultEmbed = new EmbedBuilder()
-      .setTitle(`💰 Maaş ve Hak Hakediş Raporu`)
+      .setTitle(`💰 Maaş ve Hakediş Raporu`)
       .setColor('#00ff00')
-      .setDescription(`${targetUser} kullanıcısının güncel hesaplama detayları:`)
+      .setDescription(`${targetUser} kullanıcısının güncel hakediş detayları:`)
       .addFields(
         { name: '⏱️ Toplam Mesai', value: `${hours} saat ${minutes} dakika`, inline: true },
-        { name: '📝 Kesilen Fatura', value: `${invoiceCount} adet`, inline: true },
+        { name: '📝 Fatura Sayısı / Tutar', value: `${invoiceCount} adet ($${totalInvoiceAmount})`, inline: true },
         { name: '💵 Mesai Kazancı (Y)', value: `$${shiftEarnings.toFixed(2)}`, inline: true },
-        { name: '💵 Fatura Kazancı (Z)', value: `$${invoiceEarnings.toFixed(2)}`, inline: true },
+        { name: `💵 Fatura Primi (%${SALARY_CONFIG.INVOICE_PERCENT})`, value: `$${invoiceEarnings.toFixed(2)}`, inline: true },
         { name: '🏆 Toplam Alacak Maaş', value: `**$${totalEarnings.toFixed(2)}**`, inline: false }
       )
       .setTimestamp();
