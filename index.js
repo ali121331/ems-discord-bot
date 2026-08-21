@@ -45,9 +45,14 @@ const CONFIG = {
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
-  // MAZERET BİLDİRİM VE İZİN SİSTEMİ
+  // AKADEMİ MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', 
   MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   
+  
+  // NORMAL PERSONEL MAZERET BİLDİRİM SİSTEMİ
+  NORMAL_MAZERET_YAZMA_CHANNEL_ID: '1540108129063276644',
+  NORMAL_MAZERET_LOG_CHANNEL_ID: '1540403175658496073',
+
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
   TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
@@ -384,12 +389,12 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  // --- 2. AKADEMİ DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_YAZMA_CHANNEL_ID) {
-    const msgId = message.id; // Benzersiz Takip ID'si
+    const msgId = message.id;
 
     const mazeretEmbed = new EmbedBuilder()
-      .setTitle('📥 Yeni Ders Mazeret Bildirimi')
+      .setTitle('📥 Yeni Akademi Ders Mazeret Bildirimi')
       .setColor('#ff9900')
       .addFields(
         { name: 'Gönderen Personel', value: `${message.author} (${message.author.tag})`, inline: true },
@@ -414,7 +419,6 @@ client.on('messageCreate', async (message) => {
         .setStyle(ButtonStyle.Danger)
     );
 
-    // 1. Mazeret Bildirim Kanalına Gönder
     const logChannel = message.guild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
     if (logChannel) {
       await logChannel.send({
@@ -424,7 +428,6 @@ client.on('messageCreate', async (message) => {
       });
     }
 
-    // 2. Akademi Sorumlularına Özel DM Gönder
     try {
       await message.guild.members.fetch();
       const akademiSorumlulari = message.guild.members.cache.filter(m => 
@@ -438,19 +441,58 @@ client.on('messageCreate', async (message) => {
             embeds: [mazeretEmbed],
             components: [row]
           });
-        } catch (dmErr) {
-          console.log(`${sorumlu.user.tag} kullanıcısına DM atılamadı (DM Kapalı).`);
-        }
+        } catch (dmErr) {}
       });
-    } catch (err) {
-      console.error('Akademi sorumlularına DM gönderilirken hata oluştu:', err);
+    } catch (err) {}
+
+    try { await message.delete(); } catch (err) {}
+    return;
+  }
+
+  // --- 3. NORMAL PERSONEL MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  if (message.channel.id === CONFIG.NORMAL_MAZERET_YAZMA_CHANNEL_ID) {
+    const msgId = message.id;
+
+    const mazeretEmbed = new EmbedBuilder()
+      .setTitle('📋 Yeni Personel Mazeret Bildirimi')
+      .setColor('#ffaa00')
+      .addFields(
+        { name: 'Gönderen Personel', value: `${message.author} (${message.author.tag})`, inline: true },
+        { name: 'Personel ID', value: `${message.author.id}`, inline: true },
+        { name: 'Mazeret Detayı', value: message.content || 'Görsel/Dosya Gönderildi' }
+      )
+      .setFooter({ text: `Normal Mazeret ID: ${msgId}` })
+      .setTimestamp();
+
+    if (message.attachments.size > 0) {
+      mazeretEmbed.setImage(message.attachments.first().url);
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`btn_norm_mazeret_onay_${message.author.id}_${msgId}`)
+        .setLabel('Onayla & İzin Ver')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`btn_norm_mazeret_red_${message.author.id}_${msgId}`)
+        .setLabel('Mazereti Reddet')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    const logChannel = message.guild.channels.cache.get(CONFIG.NORMAL_MAZERET_LOG_CHANNEL_ID);
+    if (logChannel) {
+      await logChannel.send({
+        content: `📌 **Yeni Personel Mazeret Bildirimi:** ${message.author}`,
+        embeds: [mazeretEmbed],
+        components: [row]
+      });
     }
 
     try { await message.delete(); } catch (err) {}
     return;
   }
 
-  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
+  // --- 4. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
 
@@ -542,6 +584,30 @@ client.on('messageCreate', async (message) => {
       .setTimestamp();
 
     await mazeretChannel.send({ embeds: [sablonEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  if (command === '!kur-normal-mazeret-sablon') {
+    const normalMazeretChannel = message.guild.channels.cache.get(CONFIG.NORMAL_MAZERET_YAZMA_CHANNEL_ID) || message.channel;
+
+    const sablonEmbed = new EmbedBuilder()
+      .setTitle('📋 EMS PERSONEL MAZERET BİLDİRİM FORMU')
+      .setColor('#ffaa00')
+      .setDescription(
+        `Mesai, nöbet, toplantı veya aktif görevlere katılım sağlayamayacak tüm personellerin mazeretlerini aşağıdaki formata uygun olarak bu kanala bildirmesi gerekmektedir.\n\n` +
+        `📌 **Mazeret Bildirim Formatı:**\n` +
+        `\`\`\`\n` +
+        `Ad Soyad / Rütbe: \n` +
+        `Mazeretli Olunan Tarih / Saat Aralığı: \n` +
+        `Mazeret Türü (Nöbet / Mesai / Toplantı / Ailevi): \n` +
+        `Mazeret / Açıklama: \n` +
+        `\`\`\`\n` +
+        `⚠️ *Gelen mazeret bildirimleri üst yönetimin onayına düşecek ve değerlendirme sonucu tarafınıza DM ile iletilecektir.*`
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await normalMazeretChannel.send({ embeds: [sablonEmbed] });
     try { await message.delete(); } catch (e) {}
   }
 
@@ -734,7 +800,6 @@ client.on('messageCreate', async (message) => {
     return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
   }
 
-  // --- FATURA SIFIRLAMA KOMUTU ---
   if (command === '!fatura-sıfırla' || command === '!fatura-sifirla') {
     const targetUser = message.mentions.users.first();
     const param = args[1]?.toLowerCase();
@@ -754,7 +819,6 @@ client.on('messageCreate', async (message) => {
     return message.reply('❌ **Hatalı kullanım!**\n• Belirli bir üye için: `!fatura-sıfırla @Kullanıcı`\n• Tüm sunucu için: `!fatura-sıfırla hepsi`');
   }
 
-  // --- FATURA ÇIKARMA / DÜŞME KOMUTU ---
   if (command === '!fatura-sil' || command === '!fatura-cikar') {
     const targetUser = message.mentions.users.first();
     const removeAmount = parseFloat(args[2]);
@@ -783,10 +847,9 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
 
-    // --- AKADEMİ SORUMLUSU ONAY / RED BUTON TIKLAMASI ---
-    if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
+    // --- AKADEMİ VEYA NORMAL PERSONEL MAZERET ONAY/RED BUTONU ---
+    if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_') || customId.startsWith('btn_norm_mazeret_onay_') || customId.startsWith('btn_norm_mazeret_red_')) {
       
-      // Mesaj zaten işlenmiş mi kontrol et
       if (interaction.message && interaction.message.components.length > 0) {
         const firstBtn = interaction.message.components[0].components[0];
         if (firstBtn && firstBtn.disabled) {
@@ -797,36 +860,16 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
-      if (!targetGuild) {
-        return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
-      }
-
-      let authorizingMember;
-      try {
-        authorizingMember = await targetGuild.members.fetch(user.id);
-      } catch (e) {
-        return interaction.reply({ content: '❌ Sunucudaki üyeliğiniz doğrulanamadı.', ephemeral: true });
-      }
-
-      const isAkademiSorumlusu = authorizingMember.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || 
-                                 authorizingMember.permissions.has(PermissionFlagsBits.Administrator);
-
-      if (!isAkademiSorumlusu) {
-        return interaction.reply({
-          content: '❌ **Mazeret taleplerini yalnızca Akademi Sorumluları ve Yöneticiler yanıtlayabilir!**',
-          ephemeral: true
-        });
-      }
-
+      const isNormal = customId.startsWith('btn_norm_mazeret_');
+      const actionType = customId.includes('_onay_') ? 'onay' : 'red';
       const parts = customId.split('_');
-      const actionType = parts[2]; // 'onay' veya 'red'
-      const studentId = parts[3];
-      const mazeretId = parts[4] || '0';
+      const studentId = parts[parts.length - 2];
+      const mazeretId = parts[parts.length - 1];
 
-      // MODAL (SEBEP PENCERESİ) AÇ
+      const modalCustomId = isNormal ? `modal_norm_mazeret_${actionType}_${studentId}_${mazeretId}` : `modal_mazeret_${actionType}_${studentId}_${mazeretId}`;
+
       const modal = new ModalBuilder()
-        .setCustomId(`modal_mazeret_${actionType}_${studentId}_${mazeretId}`)
+        .setCustomId(modalCustomId)
         .setTitle(actionType === 'onay' ? 'Mazeret Onay Sebebi' : 'Mazeret Red Sebebi');
 
       const reasonInput = new TextInputBuilder()
@@ -1060,11 +1103,12 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit()) {
     const { customId, user, guild } = interaction;
 
-    if (customId.startsWith('modal_mazeret_')) {
+    if (customId.startsWith('modal_mazeret_') || customId.startsWith('modal_norm_mazeret_')) {
+      const isNormal = customId.startsWith('modal_norm_mazeret_');
       const parts = customId.split('_');
-      const actionType = parts[2]; // 'onay' veya 'red'
-      const studentId = parts[3];
-      const mazeretId = parts[4];
+      const actionType = parts[parts.length - 3];
+      const studentId = parts[parts.length - 2];
+      const mazeretId = parts[parts.length - 1];
       const reason = interaction.fields.getTextInputValue('mazeret_sebep_input');
 
       const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
@@ -1086,9 +1130,9 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // ÖĞRENCİYE BİLDİRİM DM'İ GÖNDER
+        // PERSONELE DM BİLDİRİMİ GÖNDER
         const userDmEmbed = new EmbedBuilder()
-          .setTitle(`📑 Ders Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
+          .setTitle(isNormal ? `📋 Personel Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}` : `📑 Akademi Ders Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
           .setColor(color)
           .addFields(
             { name: 'Değerlendiren Yetkili', value: `${user.tag}`, inline: true },
@@ -1099,7 +1143,6 @@ client.on('interactionCreate', async (interaction) => {
 
         await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
 
-        // BUTONU PASİF YAPMA COMPONENT'I
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('disabled_status')
@@ -1108,8 +1151,9 @@ client.on('interactionCreate', async (interaction) => {
             .setDisabled(true)
         );
 
-        // 1. SUNUCU LOG KANALINDAKİ MESAJI BUL VE GÜNCELLE
-        const logChannel = targetGuild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
+        // LOG KANALINDAKİ MESAJI GÜNCELLE
+        const targetLogChannelId = isNormal ? CONFIG.NORMAL_MAZERET_LOG_CHANNEL_ID : CONFIG.MAZERET_LOG_CHANNEL_ID;
+        const logChannel = targetGuild.channels.cache.get(targetLogChannelId);
         if (logChannel) {
           try {
             const fetchedLogMsgs = await logChannel.messages.fetch({ limit: 50 });
@@ -1130,32 +1174,34 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // 2. AKADEMİ SORUMLULARININ DM KUTULARINDAKİ MESAJLARI TARAYIP DÜZELT
-        try {
-          const akademiSorumlulari = targetGuild.members.cache.filter(m => 
-            m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
-          );
+        // EĞER AKADEMİ MAZERETİ İSE AKADEMİ SORUMLULARININ DM'LERİNİ DÜZELT
+        if (!isNormal) {
+          try {
+            const akademiSorumlulari = targetGuild.members.cache.filter(m => 
+              m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
+            );
 
-          for (const [id, sorumluMember] of akademiSorumlulari) {
-            try {
-              const dmChannel = await sorumluMember.createDM();
-              const dmMessages = await dmChannel.messages.fetch({ limit: 20 });
-              const targetDmMsg = dmMessages.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
+            for (const [id, sorumluMember] of akademiSorumlulari) {
+              try {
+                const dmChannel = await sorumluMember.createDM();
+                const dmMessages = await dmChannel.messages.fetch({ limit: 20 });
+                const targetDmMsg = dmMessages.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
 
-              if (targetDmMsg) {
-                const updatedDmEmbed = EmbedBuilder.from(targetDmMsg.embeds[0])
-                  .setColor(color)
-                  .addFields(
-                    { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
-                    { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
-                  );
+                if (targetDmMsg) {
+                  const updatedDmEmbed = EmbedBuilder.from(targetDmMsg.embeds[0])
+                    .setColor(color)
+                    .addFields(
+                      { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
+                      { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
+                    );
 
-                await targetDmMsg.edit({ embeds: [updatedDmEmbed], components: [disabledRow] });
-              }
-            } catch (dmErr) {}
+                  await targetDmMsg.edit({ embeds: [updatedDmEmbed], components: [disabledRow] });
+                }
+              } catch (dmErr) {}
+            }
+          } catch (e) {
+            console.error('DM güncellemeleri yapılırken hata:', e);
           }
-        } catch (e) {
-          console.error('DM güncellemeleri yapılırken hata:', e);
         }
 
         return interaction.reply({
