@@ -34,7 +34,7 @@ const client = new Client({
 
 const CONFIG = {
   TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GSrEPH.-kMzYSUFsH6jFQHvM7Miq9Z7kmedvAbGbN2aRU',
-  GUILD_ID: '', // İhtiyaç halinde sunucu ID'nizi buraya girebilirsiniz
+  GUILD_ID: '', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
   WELCOME_CHANNEL_ID: '1463553957468180700',
@@ -414,7 +414,7 @@ client.on('messageCreate', async (message) => {
         .setStyle(ButtonStyle.Danger)
     );
 
-    // 1. Mazeret Bildirim Kanalına (1540397820769730641) Gönder
+    // 1. Mazeret Bildirim Kanalına Gönder
     const logChannel = message.guild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
     if (logChannel) {
       await logChannel.send({
@@ -742,9 +742,20 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
 
-    // --- AKADEMİ SORUMLUSU ONAY / RED BUTON TIKLAMASI (SEBEP PENCERESİ AÇAR) ---
+    // --- AKADEMİ SORUMLUSU ONAY / RED BUTON TIKLAMASI ---
     if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
       
+      // Mesaj zaten işlenmiş mi kontrol et
+      if (interaction.message && interaction.message.components.length > 0) {
+        const firstBtn = interaction.message.components[0].components[0];
+        if (firstBtn && firstBtn.disabled) {
+          return interaction.reply({
+            content: '❌ **Bu mazeret talebi zaten daha önce bir yetkili tarafından yanıtlanmış!**',
+            ephemeral: true
+          });
+        }
+      }
+
       const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
       if (!targetGuild) {
         return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
@@ -772,7 +783,7 @@ client.on('interactionCreate', async (interaction) => {
       const studentId = parts[3];
       const mazeretId = parts[4] || '0';
 
-      // MODAL (SEBEP GİRİŞ PENCERESİ) OLUŞTURMA
+      // MODAL (SEBEP PENCERESİ) AÇ
       const modal = new ModalBuilder()
         .setCustomId(`modal_mazeret_${actionType}_${studentId}_${mazeretId}`)
         .setTitle(actionType === 'onay' ? 'Mazeret Onay Sebebi' : 'Mazeret Red Sebebi');
@@ -1023,7 +1034,6 @@ client.on('interactionCreate', async (interaction) => {
       try {
         const targetMember = await targetGuild.members.fetch(studentId);
 
-        // ONAY / RED DURUMUNA GÖRE HAZIRLIK
         const isApproved = actionType === 'onay';
         const color = isApproved ? '#00ff00' : '#ff0000';
         const statusTitle = isApproved ? '✅ ONAYLANDI' : '❌ REDDEDİLDİ';
@@ -1048,7 +1058,7 @@ client.on('interactionCreate', async (interaction) => {
 
         await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
 
-        // HER YERDE BUTONLARI DEVRE DIŞI BIRAK (DURUM GÜNCELLEMESİ)
+        // BUTONU PASİF YAPMA COMPONENT'I
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('disabled_status')
@@ -1057,7 +1067,7 @@ client.on('interactionCreate', async (interaction) => {
             .setDisabled(true)
         );
 
-        // 1. Sunucu Log Kanalındaki Bildirim Embed'ini Güncelle
+        // 1. SUNUCU LOG KANALINDAKİ MESAJI BUL VE GÜNCELLE
         const logChannel = targetGuild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
         if (logChannel) {
           try {
@@ -1079,16 +1089,32 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // 2. DM Üzerinden Tıklandıysa Tıklanan DM Mesajını da Güncelle
-        if (interaction.message) {
-          const updatedDmEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-            .setColor(color)
-            .addFields(
-              { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
-              { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
-            );
+        // 2. AKADEMİ SORUMLULARININ DM KUTULARINDAKİ MESAJLARI TARAYIP DÜZELT
+        try {
+          const akademiSorumlulari = targetGuild.members.cache.filter(m => 
+            m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
+          );
 
-          await interaction.message.edit({ embeds: [updatedDmEmbed], components: [disabledRow] }).catch(() => {});
+          for (const [id, sorumluMember] of akademiSorumlulari) {
+            try {
+              const dmChannel = await sorumluMember.createDM();
+              const dmMessages = await dmChannel.messages.fetch({ limit: 20 });
+              const targetDmMsg = dmMessages.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
+
+              if (targetDmMsg) {
+                const updatedDmEmbed = EmbedBuilder.from(targetDmMsg.embeds[0])
+                  .setColor(color)
+                  .addFields(
+                    { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
+                    { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
+                  );
+
+                await targetDmMsg.edit({ embeds: [updatedDmEmbed], components: [disabledRow] });
+              }
+            } catch (dmErr) {}
+          }
+        } catch (e) {
+          console.error('DM güncellemeleri yapılırken hata:', e);
         }
 
         return interaction.reply({
