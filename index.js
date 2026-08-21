@@ -100,6 +100,17 @@ const SALARY_CONFIG = {
   INVOICE_PERCENT: 10    // Z miktarı (%) -> Varsayılan %10
 };
 
+// Dinamik Hizmet/Tedavi Fiyat Deposu (Varsayılan değerler)
+const PRICING = {
+  ILK_YARDIM: 250,
+  AMBULANS: 500,
+  KUCUK_CERRAHI: 1500,
+  GENEL_AMELIYAT: 5000,
+  POLIKLINIK: 300,
+  ILAC_SERUM: 200,
+  RADYOLOJI: 450
+};
+
 // --- ORTAK KADRO PANELİ OLUŞTURMA FONKSİYONU ---
 async function updateKadroPanel(guild) {
   const kadroChannel = guild.channels.cache.get(CONFIG.KADRO_PANEL_CHANNEL_ID);
@@ -358,22 +369,59 @@ client.on('messageCreate', async (message) => {
     try { await message.delete(); } catch (e) {}
   }
 
-  // 4. Tedavi Ücret Listesi Paneli Kurma
+  // 4. Fiyat Tarifesini Güncelleme Komutu (!fiyat-ayarla <1> <2> <3> <4> <5> <6> <7>)
+  if (command === '!fiyat-ayarla') {
+    if (args.length < 8) {
+      return message.reply(
+        '❌ **Hatalı kullanım!** Lütfen 7 fiyat değerini de giriniz.\n' +
+        '**Örnek:** `!fiyat-ayarla 250 500 1500 5000 300 200 450`\n' +
+        '*(Sırasıyla: İlk Yardım, Ambulans, Küçük Cerrahi, Genel Ameliyat, Poliklinik, İlaç/Serum, Radyoloji)*'
+      );
+    }
+
+    const prices = args.slice(1, 8).map(v => parseFloat(v));
+
+    if (prices.some(p => isNaN(p) || p < 0)) {
+      return message.reply('❌ **Hatalı kullanım!** Tüm fiyat değerleri geçerli birer pozitif sayı olmalıdır.');
+    }
+
+    PRICING.ILK_YARDIM = prices[0];
+    PRICING.AMBULANS = prices[1];
+    PRICING.KUCUK_CERRAHI = prices[2];
+    PRICING.GENEL_AMELIYAT = prices[3];
+    PRICING.POLIKLINIK = prices[4];
+    PRICING.ILAC_SERUM = prices[5];
+    PRICING.RADYOLOJI = prices[6];
+
+    return message.reply(
+      '✅ **Tedavi ve Hizmet Ücret Tarifesi Güncellendi!**\n' +
+      'Görsel paneli yenilemek için `!kur-fiyat-listesi` komutunu çalıştırabilirsiniz.'
+    );
+  }
+
+  // 5. Tedavi Ücret Listesi Paneli Kurma
   if (command === '!kur-fiyat-listesi') {
     const targetChannel = message.guild.channels.cache.get(CONFIG.TEDAVI_UCRET_CHANNEL_ID) || message.channel;
 
     const listEmbed = new EmbedBuilder()
       .setTitle('🏥 EMS TEDAVİ VE HİZMET ÜCRET TARİFESİ')
       .setColor('#ff0000')
-      .setDescription('Aşağıda hastanemizde uygulanan varsayılan tedavi ücretleri listelenmiştir:\n\n' +
-        '• **İlk Yardım Müdahalesi:** $X\n' +
-        '• **Ambulans Çağrı / Nakil Ücreti:** $X\n' +
-        '• **Küçük Cerrahi Operasyonlar / Ameliyat:** $X\n' +
-        '• **Genel Ameliyat ve Yoğun Bakım:** $X\n' +
-        '• **Poliklinik Muayene Ücreti:** $X\n' +
-        '• **İlaç ve Serum Tedavisi:** $X\n' +
-        '• **Radyolojik Görüntüleme / Tahlil:** $X\n\n' +
-        '*(Lütfen kestiğiniz faturaları ve tedavi tutarını bu kanala yazarak iletiniz.)*')
+      .setDescription(
+        'Aşağıda hastanemizde uygulanan varsayılan tedavi ücretleri listelenmiştir:\n\n' +
+        `• **İlk Yardım Müdahalesi:** $${PRICING.ILK_YARDIM}\n` +
+        `• **Ambulans Çağrı / Nakil Ücreti:** $${PRICING.AMBULANS}\n` +
+        `• **Küçük Cerrahi Operasyonlar / Ameliyat:** $${PRICING.KUCUK_CERRAHI}\n` +
+        `• **Genel Ameliyat ve Yoğun Bakım:** $${PRICING.GENEL_AMELIYAT}\n` +
+        `• **Poliklinik Muayene Ücreti:** $${PRICING.POLIKLINIK}\n` +
+        `• **İlaç ve Serum Tedavisi:** $${PRICING.ILAC_SERUM}\n` +
+        `• **Radyolojik Görüntüleme / Tahlil:** $${PRICING.RADYOLOJI}\n\n` +
+        '--------------------------------------------------\n' +
+        '⚠️ **FATURA BİLDİRİM ŞABLONU**\n' +
+        'Kestiğiniz faturaların maaşınıza tam yansıması için bu kanala mesaj atarken **mutlaka** aşağıdaki formatı kullanınız:\n\n' +
+        '📌 **Şablon:** `[Hasta Adı Soyadı] - [Yapılan İşlem] - [Tutar]`\n' +
+        '💡 **Örnek:** `Marcus Holloway - Ameliyat - 5000$`\n\n' +
+        '*(Sistem mesaj içerisindeki ilk sayısal tutarı otomatik algılayarak maaş bakiyenize faturanın primini ekleyecektir.)*'
+      )
       .setImage(CONFIG.IMAGE_URL)
       .setTimestamp();
 
@@ -381,7 +429,7 @@ client.on('messageCreate', async (message) => {
     try { await message.delete(); } catch (e) {}
   }
 
-  // 5. Saatlik Ücret ve Fatura Yüzdesini Ayarlama (!maas-ayarla <Y> <Z>)
+  // 6. Saatlik Ücret ve Fatura Yüzdesini Ayarlama (!maas-ayarla <Y> <Z>)
   if (command === '!maas-ayarla') {
     const hourly = parseFloat(args[1]);
     const percent = parseFloat(args[2]);
@@ -396,7 +444,7 @@ client.on('messageCreate', async (message) => {
     return message.reply(`✅ **Maaş parametreleri güncellendi!**\n• Saat Başı Ücret (Y): **$${hourly}**\n• Fatura Prim Yüzdesi (Z): **%${percent}**`);
   }
 
-  // 6. Maaş ve Mesai Hesaplama Komutu (!maas-hesapla @Kullanici)
+  // 7. Maaş ve Mesai Hesaplama Komutu (!maas-hesapla @Kullanici)
   if (command === '!maas-hesapla') {
     const targetUser = message.mentions.users.first() || message.author;
 
@@ -433,7 +481,7 @@ client.on('messageCreate', async (message) => {
     return message.reply({ embeds: [resultEmbed] });
   }
 
-  // 7. Kullanıcıya Mesai Ekleme
+  // 8. Kullanıcıya Mesai Ekleme
   if (command === '!mesai-ekle') {
     const targetUser = message.mentions.users.first();
     const addMinutes = parseInt(args[2]);
@@ -449,7 +497,7 @@ client.on('messageCreate', async (message) => {
     return message.reply(`✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`);
   }
 
-  // 8. Kullanıcıdan Mesai Düşme
+  // 9. Kullanıcıdan Mesai Düşme
   if (command === '!mesai-cikar') {
     const targetUser = message.mentions.users.first();
     const removeMinutes = parseInt(args[2]);
