@@ -31,6 +31,7 @@ const client = new Client({
 
 const CONFIG = {
   TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GSrEPH.-kMzYSUFsH6jFQHvM7Miq9Z7kmedvAbGbN2aRU',
+  GUILD_ID: '', // İhtiyaç halinde sunucu ID'nizi buraya girebilirsiniz
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
   WELCOME_CHANNEL_ID: '1463553957468180700',
@@ -42,7 +43,8 @@ const CONFIG = {
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
   // MAZERET BİLDİRİM VE İZİN SİSTEMİ
-  MAZERET_CHANNEL_ID: '1540397820769730641',
+  MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', // Personelin mazeret yazacağı kanal
+  MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   // Mazeret bildiriminin düşeceği kanal
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
   TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
@@ -380,7 +382,7 @@ client.on('messageCreate', async (message) => {
   }
 
   // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
-  if (message.channel.id === CONFIG.MAZERET_CHANNEL_ID) {
+  if (message.channel.id === CONFIG.MAZERET_YAZMA_CHANNEL_ID) {
     const mazeretEmbed = new EmbedBuilder()
       .setTitle('📥 Yeni Ders Mazeret Bildirimi')
       .setColor('#ff9900')
@@ -406,12 +408,15 @@ client.on('messageCreate', async (message) => {
         .setStyle(ButtonStyle.Danger)
     );
 
-    // 1. Mazeret Kanalına Gönder
-    await message.channel.send({
-      content: `📌 <@&${CONFIG.AKADEMI_SORUMLUSU_ROLE_ID}> **Yeni Mazeret Bildirimi:** ${message.author}`,
-      embeds: [mazeretEmbed],
-      components: [row]
-    });
+    // 1. Mazeret Bildirim Kanalına (1540397820769730641) Gönder
+    const logChannel = message.guild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
+    if (logChannel) {
+      await logChannel.send({
+        content: `📌 <@&${CONFIG.AKADEMI_SORUMLUSU_ROLE_ID}> **Yeni Mazeret Bildirimi:** ${message.author}`,
+        embeds: [mazeretEmbed],
+        components: [row]
+      });
+    }
 
     // 2. Akademi Sorumlularına Özel DM Gönder
     try {
@@ -512,7 +517,7 @@ client.on('messageCreate', async (message) => {
   }
 
   if (command === '!kur-mazeret-sablon') {
-    const mazeretChannel = message.guild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID) || message.channel;
+    const mazeretChannel = message.guild.channels.cache.get(CONFIG.MAZERET_YAZMA_CHANNEL_ID) || message.channel;
 
     const sablonEmbed = new EmbedBuilder()
       .setTitle('📚 AKADEMİ DERS MAZERET BİLDİRİM FORMU')
@@ -525,7 +530,7 @@ client.on('messageCreate', async (message) => {
         `Katılamayacağı Ders / Saat: \n` +
         `Mazeret / Katılamama Sebebi: \n` +
         `\`\`\`\n` +
-        `⚠️ *Attığınız mazeret bildirimleri hem ilgili kanala hem de Akademi Sorumlularının DM kutusuna düşecek, yöneticiler tarafından onaylanacak veya reddedilecektir.*`
+        `⚠️ *Attığınız mazeret bildirimleri mazeret kanalına ve Akademi Sorumlularının DM kutusuna düşecek, yetkililer tarafından onaylanacak veya reddedilecektir.*`
       )
       .setImage(CONFIG.IMAGE_URL)
       .setTimestamp();
@@ -728,11 +733,26 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  const { customId, user, guild, member, message } = interaction;
+  const { customId, user, guild, message } = interaction;
 
   // --- AKADEMİ SORUMLUSU ONAY / RED BUTONLARI ---
   if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
-    const isAkademiSorumlusu = member?.roles?.cache?.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || member?.permissions?.has(PermissionFlagsBits.Administrator);
+    
+    // DM'den tıklanırsa targetGuild çekilir
+    const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+    if (!targetGuild) {
+      return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
+    }
+
+    let authorizingMember;
+    try {
+      authorizingMember = await targetGuild.members.fetch(user.id);
+    } catch (e) {
+      return interaction.reply({ content: '❌ Sunucudaki üyeliğiniz doğrulanamadı.', ephemeral: true });
+    }
+
+    const isAkademiSorumlusu = authorizingMember.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || 
+                               authorizingMember.permissions.has(PermissionFlagsBits.Administrator);
 
     if (!isAkademiSorumlusu) {
       return interaction.reply({
@@ -746,10 +766,10 @@ client.on('interactionCreate', async (interaction) => {
     const studentId = parts[3];
 
     try {
-      const targetMember = await guild.members.fetch(studentId);
+      const targetMember = await targetGuild.members.fetch(studentId);
 
       if (actionType === 'onay') {
-        const izinliRole = guild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
+        const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
         if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
           await targetMember.roles.add(izinliRole);
         }
@@ -934,7 +954,7 @@ client.on('interactionCreate', async (interaction) => {
 
   // --- TÜM PERSONEL MESAİLERİ ---
   if (customId === 'btn_tum_mesailer') {
-    const hasRole = member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || member?.permissions?.has(PermissionFlagsBits.Administrator);
+    const hasRole = interaction.member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || interaction.member?.permissions?.has(PermissionFlagsBits.Administrator);
 
     if (!hasRole) {
       return interaction.reply({
@@ -982,6 +1002,7 @@ client.on('interactionCreate', async (interaction) => {
 
   // --- TİCKET OLUŞTURMA ---
   if (customId === 'btn_ticket_ac') {
+    if (!guild) return;
     const channelName = `ticket-${user.username}`;
     
     if (guild.channels.cache.find(c => c.name === channelName)) {
