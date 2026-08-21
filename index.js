@@ -42,7 +42,7 @@ const CONFIG = {
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
   // MAZERET BİLDİRİM VE İZİN SİSTEMİ
-  MAZERET_CHANNEL_ID: '1540109672625733642',
+  MAZERET_CHANNEL_ID: '1540397820769730641',
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
   TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
@@ -406,12 +406,34 @@ client.on('messageCreate', async (message) => {
         .setStyle(ButtonStyle.Danger)
     );
 
-    // Doğrudan Mazeret Kanalına İletilir
+    // 1. Mazeret Kanalına Gönder
     await message.channel.send({
       content: `📌 <@&${CONFIG.AKADEMI_SORUMLUSU_ROLE_ID}> **Yeni Mazeret Bildirimi:** ${message.author}`,
       embeds: [mazeretEmbed],
       components: [row]
     });
+
+    // 2. Akademi Sorumlularına Özel DM Gönder
+    try {
+      await message.guild.members.fetch();
+      const akademiSorumlulari = message.guild.members.cache.filter(m => 
+        m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
+      );
+
+      akademiSorumlulari.forEach(async (sorumlu) => {
+        try {
+          await sorumlu.send({
+            content: `🔔 **Akademi Mazeret Bildirimi:** ${message.author} bir mazeret bildiriminde bulundu.`,
+            embeds: [mazeretEmbed],
+            components: [row]
+          });
+        } catch (dmErr) {
+          console.log(`${sorumlu.user.tag} kullanıcısına DM atılamadı (DM Kapalı).`);
+        }
+      });
+    } catch (err) {
+      console.error('Akademi sorumlularına DM gönderilirken hata oluştu:', err);
+    }
 
     try { await message.delete(); } catch (err) {}
     return;
@@ -503,7 +525,7 @@ client.on('messageCreate', async (message) => {
         `Katılamayacağı Ders / Saat: \n` +
         `Mazeret / Katılamama Sebebi: \n` +
         `\`\`\`\n` +
-        `⚠️ *Attığınız mazeret bildirimleri Akademi Sorumluları tarafından bu kanaldan incelenerek onaylanacak veya reddedilecektir.*`
+        `⚠️ *Attığınız mazeret bildirimleri hem ilgili kanala hem de Akademi Sorumlularının DM kutusuna düşecek, yöneticiler tarafından onaylanacak veya reddedilecektir.*`
       )
       .setImage(CONFIG.IMAGE_URL)
       .setTimestamp();
