@@ -351,4 +351,514 @@ client.on('messageCreate', async (message) => {
         await sorumlu.send({
           content: `🔔 **Akademi Sorumlusu:** <@${message.author.id}> tarafından yeni bir ders mazereti bildirildi!`,
           embeds: [mazeretEmbed],
-          components:
+          components: [row]
+        });
+      } catch (e) {
+        console.log(`${sorumlu.user.tag} kullanıcısının DM'i kapalı.`);
+      }
+    });
+
+    try { await message.delete(); } catch (err) {}
+    return;
+  }
+
+  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
+  if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
+    const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
+
+    const matches = message.content.match(/\d+/g);
+    let invoiceAmount = 0;
+    if (matches && matches.length > 0) {
+      invoiceAmount = parseFloat(matches[0]); 
+    }
+
+    if (logChannel) {
+      const embed = new EmbedBuilder()
+        .setTitle('📑 Yeni Tedavi / Fatura Kaydı')
+        .setColor('#00ffcc')
+        .addFields(
+          { name: 'Personel', value: `${message.author} (${message.author.tag})`, inline: true },
+          { name: 'Algılanan Fatura Tutarı', value: `$${invoiceAmount}`, inline: true },
+          { name: 'İçerik / Detay', value: message.content || 'Görsel/Dosya Gönderildi' }
+        )
+        .setTimestamp();
+
+      if (message.attachments.size > 0) {
+        embed.setImage(message.attachments.first().url);
+      }
+
+      await logChannel.send({ embeds: [embed] });
+
+      const currentAmount = userInvoices.get(message.author.id) || 0;
+      const currentCount = userInvoiceCounts.get(message.author.id) || 0;
+
+      userInvoices.set(message.author.id, currentAmount + invoiceAmount);
+      userInvoiceCounts.set(message.author.id, currentCount + 1);
+    }
+
+    try {
+      await message.delete();
+    } catch (err) {
+      console.error('Mesaj silinemedi:', err);
+    }
+    return;
+  }
+
+  // --- YÖNETİCİ VE SİSTEM KOMUTLARI ---
+  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const args = message.content.trim().split(/ +/);
+  const command = args[0].toLowerCase();
+
+  // Mazeret Kanalı Şablon Kurma Komutu
+  if (command === '!kur-mazeret-sablon') {
+    const mazeretChannel = message.guild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID) || message.channel;
+
+    const sablonEmbed = new EmbedBuilder()
+      .setTitle('📚 AKADEMİ DERS MAZERET BİLDİRİM FORMU')
+      .setColor('#ff9900')
+      .setDescription(
+        `Eğitim ve Akademi derslerine katılım sağlayamayacak kişilerin mazeretlerini aşağıdaki formata uygun olarak bu kanala yazmaları gerekmektedir.\n\n` +
+        `📌 **Mazeret Bildirim Formatı:**\n` +
+        `\`\`\`\n` +
+        `Ad Soyad / Rütbe: \n` +
+        `Katılamayacağı Ders / Saat: \n` +
+        `Mazeret / Katılamama Sebebi: \n` +
+        `\`\`\`\n` +
+        `⚠️ *Attığınız mesajlar Akademi Sorumlularına iletilecek ve onaylandığında tarafınıza DM üzerinden dönüş sağlanacaktır.*`
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await mazeretChannel.send({ embeds: [sablonEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // Manuel Kadro Paneli Güncelleme Komutu
+  if (command === '!kadro-guncelle') {
+    if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
+
+    const success = await updateKadroPanel(message.guild);
+    try { await message.delete(); } catch (e) {}
+
+    if (success) {
+      const msg = await message.channel.send('✅ **Kadro paneli başarıyla güncellendi!**');
+      setTimeout(() => msg.delete().catch(() => {}), 5000);
+    } else {
+      const msg = await message.channel.send('❌ **Kadro paneli güncellenirken bir hata oluştu veya kanal bulunamadı.**');
+      setTimeout(() => msg.delete().catch(() => {}), 5000);
+    }
+  }
+
+  // Mesai Paneli Kurma
+  if (command === '!kur-mesai') {
+    const embed = new EmbedBuilder()
+      .setTitle('🚑 EMS Mesai Takip Paneli')
+      .setDescription('Mesai işlemlerinizi ve geçmiş toplam mesai sürenizi aşağıdaki butonlardan yönetebilirsiniz.')
+      .setColor('#ff0000')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btnGiris = new ButtonBuilder().setCustomId('btn_mesai_giris').setLabel('Mesai Giriş').setStyle(ButtonStyle.Success);
+    const btnCikis = new ButtonBuilder().setCustomId('btn_mesai_cikis').setLabel('Mesai Çıkış').setStyle(ButtonStyle.Danger);
+    const btnToplam = new ButtonBuilder().setCustomId('btn_toplam_mesai').setLabel('Toplam Mesailerim').setStyle(ButtonStyle.Secondary);
+    const btnTümMesailer = new ButtonBuilder().setCustomId('btn_tum_mesailer').setLabel('Tüm Personel Mesaileri').setStyle(ButtonStyle.Secondary);
+
+    const row = new ActionRowBuilder().addComponents(btnGiris, btnCikis, btnToplam, btnTümMesailer);
+
+    await message.channel.send({ embeds: [embed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // Ticket Paneli Kurma
+  if (command === '!kur-ticket') {
+    const embed = new EmbedBuilder()
+      .setTitle('🎫 Destek / Ticket Sistemi')
+      .setDescription('Yetkililerle iletişime geçmek için aşağıdaki butona tıklayarak talep oluşturabilirsiniz.')
+      .setColor('#00ff00');
+
+    const btnTicket = new ButtonBuilder().setCustomId('btn_ticket_ac').setLabel('Ticket Oluştur').setStyle(ButtonStyle.Primary);
+    const row = new ActionRowBuilder().addComponents(btnTicket);
+
+    await message.channel.send({ embeds: [embed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // Fiyat Tarifesini Güncelleme Komutu
+  if (command === '!fiyat-ayarla') {
+    if (args.length < 8) {
+      return message.reply(
+        '❌ **Hatalı kullanım!** Lütfen 7 fiyat değerini de giriniz.\n' +
+        '**Örnek:** `!fiyat-ayarla 250 500 1500 5000 300 200 450`\n' +
+        '*(Sırasıyla: İlk Yardım, Ambulans, Küçük Cerrahi, Genel Ameliyat, Poliklinik, İlaç/Serum, Radyoloji)*'
+      );
+    }
+
+    const prices = args.slice(1, 8).map(v => parseFloat(v));
+
+    if (prices.some(p => isNaN(p) || p < 0)) {
+      return message.reply('❌ **Hatalı kullanım!** Tüm fiyat değerleri geçerli birer pozitif sayı olmalıdır.');
+    }
+
+    PRICING.ILK_YARDIM = prices[0];
+    PRICING.AMBULANS = prices[1];
+    PRICING.KUCUK_CERRAHI = prices[2];
+    PRICING.GENEL_AMELIYAT = prices[3];
+    PRICING.POLIKLINIK = prices[4];
+    PRICING.ILAC_SERUM = prices[5];
+    PRICING.RADYOLOJI = prices[6];
+
+    return message.reply(
+      '✅ **Tedavi ve Hizmet Ücret Tarifesi Güncellendi!**\n' +
+      'Görsel paneli yenilemek için `!kur-fiyat-listesi` komutunu çalıştırabilirsiniz.'
+    );
+  }
+
+  // Tedavi Ücret Listesi Paneli Kurma
+  if (command === '!kur-fiyat-listesi') {
+    const targetChannel = message.guild.channels.cache.get(CONFIG.TEDAVI_UCRET_CHANNEL_ID) || message.channel;
+
+    const listEmbed = new EmbedBuilder()
+      .setTitle('🏥 EMS TEDAVİ VE HİZMET ÜCRET TARİFESİ')
+      .setColor('#ff0000')
+      .setDescription(
+        'Aşağıda hastanemizde uygulanan varsayılan tedavi ücretleri listelenmiştir:\n\n' +
+        `• **İlk Yardım Müdahalesi:** $${PRICING.ILK_YARDIM}\n` +
+        `• **Ambulans Çağrı / Nakil Ücreti:** $${PRICING.AMBULANS}\n` +
+        `• **Küçük Cerrahi Operasyonlar / Ameliyat:** $${PRICING.KUCUK_CERRAHI}\n` +
+        `• **Genel Ameliyat ve Yoğun Bakım:** $${PRICING.GENEL_AMELIYAT}\n` +
+        `• **Poliklinik Muayene Ücreti:** $${PRICING.POLIKLINIK}\n` +
+        `• **İlaç ve Serum Tedavisi:** $${PRICING.ILAC_SERUM}\n` +
+        `• **Radyolojik Görüntüleme / Tahlil:** $${PRICING.RADYOLOJI}\n\n` +
+        '--------------------------------------------------\n' +
+        '⚠️ **FATURA BİLDİRİM ŞABLONU**\n' +
+        'Kestiğiniz faturaların maaşınıza tam yansıması için bu kanala mesaj atarken **mutlaka** aşağıdaki formatı kullanınız:\n\n' +
+        '📌 **Şablon:** `[Hasta Adı Soyadı] - [Yapılan İşlem] - [Tutar]`\n' +
+        '💡 **Örnek:** `Marcus Holloway - Ameliyat - 5000$`\n\n' +
+        '*(Sistem mesaj içerisindeki ilk sayısal tutarı otomatik algılayarak maaş bakiyenize faturanın primini ekleyecektir.)*'
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await targetChannel.send({ embeds: [listEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // Saatlik Ücret ve Fatura Yüzdesini Ayarlama
+  if (command === '!maas-ayarla') {
+    const hourly = parseFloat(args[1]);
+    const percent = parseFloat(args[2]);
+
+    if (isNaN(hourly) || isNaN(percent)) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!maas-ayarla 100 15` *(100$ saatlik ücret, %15 fatura primi)*');
+    }
+
+    SALARY_CONFIG.HOURLY_RATE = hourly;
+    SALARY_CONFIG.INVOICE_PERCENT = percent;
+
+    return message.reply(`✅ **Maaş parametreleri güncellendi!**\n• Saat Başı Ücret (Y): **$${hourly}**\n• Fatura Prim Yüzdesi (Z): **%${percent}**`);
+  }
+
+  // Maaş ve Mesai Hesaplama Komutu
+  if (command === '!maas-hesapla') {
+    const targetUser = message.mentions.users.first() || message.author;
+
+    let accumulatedMs = totalShifts.get(targetUser.id) || 0;
+    if (activeShifts.has(targetUser.id)) {
+      const shift = activeShifts.get(targetUser.id);
+      accumulatedMs += (Date.now() - shift.startTime);
+    }
+
+    const totalHours = accumulatedMs / (1000 * 60 * 60);
+    const totalInvoiceAmount = userInvoices.get(targetUser.id) || 0;
+    const invoiceCount = userInvoiceCounts.get(targetUser.id) || 0;
+
+    const shiftEarnings = totalHours * SALARY_CONFIG.HOURLY_RATE;
+    const invoiceEarnings = (totalInvoiceAmount * SALARY_CONFIG.INVOICE_PERCENT) / 100;
+    const totalEarnings = shiftEarnings + invoiceEarnings;
+
+    const hours = Math.floor(totalHours);
+    const minutes = Math.floor((accumulatedMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    const resultEmbed = new EmbedBuilder()
+      .setTitle(`💰 Maaş ve Hakediş Raporu`)
+      .setColor('#00ff00')
+      .setDescription(`${targetUser} kullanıcısının güncel hakediş detayları:`)
+      .addFields(
+        { name: '⏱️ Toplam Mesai', value: `${hours} saat ${minutes} dakika`, inline: true },
+        { name: '📝 Fatura Sayısı / Tutar', value: `${invoiceCount} adet ($${totalInvoiceAmount})`, inline: true },
+        { name: '💵 Mesai Kazancı (Y)', value: `$${shiftEarnings.toFixed(2)}`, inline: true },
+        { name: `💵 Fatura Primi (%${SALARY_CONFIG.INVOICE_PERCENT})`, value: `$${invoiceEarnings.toFixed(2)}`, inline: true },
+        { name: '🏆 Toplam Alacak Maaş', value: `**$${totalEarnings.toFixed(2)}**`, inline: false }
+      )
+      .setTimestamp();
+
+    return message.reply({ embeds: [resultEmbed] });
+  }
+
+  // Kullanıcıya Mesai Ekleme
+  if (command === '!mesai-ekle') {
+    const targetUser = message.mentions.users.first();
+    const addMinutes = parseInt(args[2]);
+
+    if (!targetUser || isNaN(addMinutes) || addMinutes <= 0) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!mesai-ekle @Kullanıcı 60`');
+    }
+
+    const addMs = addMinutes * 60 * 1000;
+    const currentTotal = totalShifts.get(targetUser.id) || 0;
+    totalShifts.set(targetUser.id, currentTotal + addMs);
+
+    return message.reply(`✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`);
+  }
+
+  // Kullanıcıdan Mesai Düşme
+  if (command === '!mesai-cikar') {
+    const targetUser = message.mentions.users.first();
+    const removeMinutes = parseInt(args[2]);
+
+    if (!targetUser || isNaN(removeMinutes) || removeMinutes <= 0) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!mesai-cikar @Kullanıcı 30`');
+    }
+
+    const removeMs = removeMinutes * 60 * 1000;
+    const currentTotal = totalShifts.get(targetUser.id) || 0;
+    const newTotal = Math.max(0, currentTotal - removeMs);
+    totalShifts.set(targetUser.id, newTotal);
+
+    return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
+  }
+});
+
+// BUTON ETKİLEŞİMLERİ
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  const { customId, user, guild, channel, member } = interaction;
+
+  // --- AKADEMİ SORUMLUSU DM ÜZERİNDEN CEVAP VER BUTONU ---
+  if (customId.startsWith('btn_mazeret_cevap_')) {
+    const studentId = customId.replace('btn_mazeret_cevap_', '');
+
+    activeMazeretReplies.set(user.id, {
+      studentId: studentId,
+      guildId: guild ? guild.id : '1463553956839166013'
+    });
+
+    return interaction.reply({
+      content: '📝 **Lütfen mazereti onaylama nedeninizi / açıklamanızı doğrudan bu DM sohbetine yazıp gönderin.**\n*(Yazacağınız mesaj doğrudan personele iletilecek ve kişiye İzinli Rolü tanımlanacaktır.)*',
+      ephemeral: false
+    });
+  }
+
+  // --- MESAİ GİRİŞ ---
+  if (customId === 'btn_mesai_giris') {
+    if (activeShifts.has(user.id)) {
+      return interaction.reply({ content: 'Zaten aktif bir mesainiz var!', ephemeral: true });
+    }
+
+    const checkTimer = setInterval(async () => {
+      try {
+        const confirmRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('btn_mesai_devam').setLabel('Evet, Mesaideyim').setStyle(ButtonStyle.Primary)
+        );
+
+        try {
+          await user.send({
+            content: `⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+            components: [confirmRow]
+          });
+        } catch (dmErr) {
+          if (channel) {
+            await channel.send({
+              content: `${user} (DM Kutunuz kapalı olduğu için buradan bildirildi)\n⏰ **1 saattir mesaidesiniz. Hâlâ mesaide misiniz?**\n*30 dakika içinde aşağıdaki butona tıklamazsanız mesainiz otomatik sonlandırılacaktır.*`,
+              components: [confirmRow]
+            });
+          }
+        }
+
+        const timeoutTimer = setTimeout(async () => {
+          if (activeShifts.has(user.id)) {
+            const shift = activeShifts.get(user.id);
+            clearInterval(shift.checkTimer);
+
+            const durationMs = Date.now() - shift.startTime;
+            const pastTotal = totalShifts.get(user.id) || 0;
+            totalShifts.set(user.id, pastTotal + durationMs);
+
+            activeShifts.delete(user.id);
+
+            try {
+              await user.send(`🛑 30 dakika boyunca yanıt vermediğiniz için mesainiz otomatik olarak sonlandırıldı.`);
+            } catch (e) {}
+
+            if (channel) {
+              await channel.send(`🛑 ${user} 30 dakika boyunca yanıt vermediği için mesaisi otomatik olarak sonlandırıldı.`);
+            }
+          }
+        }, 30 * 60 * 1000);
+
+        const currentShift = activeShifts.get(user.id);
+        if (currentShift) currentShift.timeoutTimer = timeoutTimer;
+
+      } catch (err) {
+        console.error('Mesai kontrol işlemi sırasında hata:', err);
+      }
+    }, 60 * 60 * 1000);
+
+    activeShifts.set(user.id, {
+      startTime: Date.now(),
+      checkTimer: checkTimer,
+      timeoutTimer: null
+    });
+
+    return interaction.reply({ content: '✅ **Mesaiye giriş yapıldı.** İyi çalışmalar! Kontroller DM üzerinden sağlanacaktır.', ephemeral: true });
+  }
+
+  // --- MESAİ DEVAM ONAYI ---
+  if (customId === 'btn_mesai_devam') {
+    const shift = activeShifts.get(user.id);
+    if (!shift) {
+      return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor.', ephemeral: true });
+    }
+
+    if (shift.timeoutTimer) {
+      clearTimeout(shift.timeoutTimer);
+      shift.timeoutTimer = null;
+    }
+
+    await interaction.reply({ content: '✅ **Mesaide olduğunuz doğrulandı.** İyi görevler!' });
+  }
+
+  // --- MESAİ ÇIKIŞ ---
+  if (customId === 'btn_mesai_cikis') {
+    if (!activeShifts.has(user.id)) {
+      return interaction.reply({ content: 'Aktif bir mesainiz bulunmuyor!', ephemeral: true });
+    }
+
+    const shift = activeShifts.get(user.id);
+    clearInterval(shift.checkTimer);
+    if (shift.timeoutTimer) clearTimeout(shift.timeoutTimer);
+
+    const durationMs = Date.now() - shift.startTime;
+    const pastTotal = totalShifts.get(user.id) || 0;
+    totalShifts.set(user.id, pastTotal + durationMs);
+
+    activeShifts.delete(user.id);
+
+    const minutes = Math.floor(durationMs / 60000);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    return interaction.reply({ 
+      content: `🛑 **Mesaiden çıkış yapıldı.** Bu oturumdaki süreniz: **${hours} saat ${remainingMinutes} dakika**.`, 
+      ephemeral: true 
+    });
+  }
+
+  // --- TOPLAM MESAİLERİM ---
+  if (customId === 'btn_toplam_mesai') {
+    let accumulatedMs = totalShifts.get(user.id) || 0;
+
+    if (activeShifts.has(user.id)) {
+      const shift = activeShifts.get(user.id);
+      accumulatedMs += (Date.now() - shift.startTime);
+    }
+
+    const totalMinutes = Math.floor(accumulatedMs / 60000);
+    const totalHours = Math.floor(totalMinutes / 60);
+    const remainingMinutes = totalMinutes % 60;
+
+    return interaction.reply({
+      content: `📊 **Toplam Mesai Süreniz:** **${totalHours} saat ${remainingMinutes} dakika**.`,
+      ephemeral: true
+    });
+  }
+
+  // --- TÜM PERSONEL MESAİLERİ ---
+  if (customId === 'btn_tum_mesailer') {
+    const hasRole = member?.roles?.cache?.has(CONFIG.HASTANE_PERSONELI_ROLE_ID) || member?.permissions?.has(PermissionFlagsBits.Administrator);
+
+    if (!hasRole) {
+      return interaction.reply({
+        content: '❌ **Bu işlem için Hastane Personeli yetkisine sahip olmalısınız!**',
+        ephemeral: true
+      });
+    }
+
+    const allUserIds = new Set([...totalShifts.keys(), ...activeShifts.keys()]);
+
+    if (allUserIds.size === 0) {
+      return interaction.reply({
+        content: '📋 Henüz sistemde kayıtlı hiçbir mesai verisi bulunmuyor.',
+        ephemeral: true
+      });
+    }
+
+    let description = '';
+
+    for (const userId of allUserIds) {
+      let accumulatedMs = totalShifts.get(userId) || 0;
+      const isCurrentlyActive = activeShifts.has(userId);
+
+      if (isCurrentlyActive) {
+        const shift = activeShifts.get(userId);
+        accumulatedMs += (Date.now() - shift.startTime);
+      }
+
+      const totalMinutes = Math.floor(accumulatedMs / 60000);
+      const totalHours = Math.floor(totalMinutes / 60);
+      const remainingMinutes = totalMinutes % 60;
+
+      const statusText = isCurrentlyActive ? '🟢 *(Şu an mesaide)*' : '🔴 *(Mesaide değil)*';
+      description += `<@${userId}> — **${totalHours} saat ${remainingMinutes} dakika** ${statusText}\n`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('📋 Tüm Personel Mesai Listesi')
+      .setDescription(description)
+      .setColor('#0099ff')
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // --- TİCKET OLUŞTURMA ---
+  if (customId === 'btn_ticket_ac') {
+    const channelName = `ticket-${user.username}`;
+    
+    if (guild.channels.cache.find(c => c.name === channelName)) {
+      return interaction.reply({ content: 'Zaten açık bir biletiniz var.', ephemeral: true });
+    }
+
+    const ticketChannel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      parent: CONFIG.TICKET_CATEGORY_ID,
+      permissionOverwrites: [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+      ]
+    });
+
+    const closeBtn = new ButtonBuilder().setCustomId('btn_ticket_kapat').setLabel('Ticket Kapat').setStyle(ButtonStyle.Danger);
+    const closeRow = new ActionRowBuilder().addComponents(closeBtn);
+
+    await ticketChannel.send({ 
+      content: `Merhaba ${user}, yetkililer kısa süre içinde sizinle ilgilenecektir.`, 
+      components: [closeRow] 
+    });
+
+    return interaction.reply({ content: `Talebiniz oluşturuldu: ${ticketChannel}`, ephemeral: true });
+  }
+
+  // --- TİCKET KAPATMA ---
+  if (customId === 'btn_ticket_kapat') {
+    await interaction.reply('Ticket 5 saniye içinde kapatılıyor...');
+    setTimeout(() => {
+      interaction.channel.delete().catch(() => {});
+    }, 5000);
+  }
+});
+
+client.login(CONFIG.TOKEN);
