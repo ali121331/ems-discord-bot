@@ -13,8 +13,9 @@ const express = require('express');
 
 // --- UPTIME WEB SUNUCUSU ---
 const app = express();
+const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('EMS Bot 7/24 Aktif!'));
-app.listen(3000, () => console.log('Uptime web sunucusu hazır.'));
+app.listen(PORT, () => console.log(`Uptime web sunucusu ${PORT} portunda hazır.`));
 
 // --- BOT YAPILANDIRMASI ---
 const client = new Client({
@@ -25,7 +26,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
   ],
-  partials: [Partials.Channel, Partials.Message] // DM Mesajlaşmaları ve Takibi İçin Gerekli
+  partials: [Partials.Channel, Partials.Message]
 });
 
 const CONFIG = {
@@ -281,7 +282,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // --- 1. DM CEVAPLAMA SİSTEMİ (AKADEMİ SORUMLUSU DM'DEN CEVAP YAZINCA ÇALIŞIR) ---
+  // --- 1. DM CEVAPLAMA SİSTEMİ ---
   if (!message.guild) {
     const activeData = activeMazeretReplies.get(message.author.id);
     if (!activeData) {
@@ -293,12 +294,10 @@ client.on('messageCreate', async (message) => {
       const targetMember = await targetGuild.members.fetch(activeData.studentId);
       const izinliRole = targetGuild.roles.cache.get(CONFIG.IZINLI_PERSONEL_ROLE_ID);
 
-      // İzinli Rolü Verilir
       if (izinliRole && !targetMember.roles.cache.has(izinliRole.id)) {
         await targetMember.roles.add(izinliRole);
       }
 
-      // Personelin (Öğrencinin) DM Kutusuna İletilir
       const userDmEmbed = new EmbedBuilder()
         .setTitle('📑 Ders Mazeret Bidiriminiz Yanıtlandı')
         .setColor('#00ff00')
@@ -352,77 +351,4 @@ client.on('messageCreate', async (message) => {
         await sorumlu.send({
           content: `🔔 **Akademi Sorumlusu:** <@${message.author.id}> tarafından yeni bir ders mazereti bildirildi!`,
           embeds: [mazeretEmbed],
-          components: [row]
-        });
-      } catch (e) {
-        console.log(`${sorumlu.user.tag} kullanıcısının DM'i kapalı.`);
-      }
-    });
-
-    try { await message.delete(); } catch (err) {}
-    return;
-  }
-
-  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
-  if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
-    const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
-
-    const matches = message.content.match(/\d+/g);
-    let invoiceAmount = 0;
-    if (matches && matches.length > 0) {
-      invoiceAmount = parseFloat(matches[0]); 
-    }
-
-    if (logChannel) {
-      const embed = new EmbedBuilder()
-        .setTitle('📑 Yeni Tedavi / Fatura Kaydı')
-        .setColor('#00ffcc')
-        .addFields(
-          { name: 'Personel', value: `${message.author} (${message.author.tag})`, inline: true },
-          { name: 'Algılanan Fatura Tutarı', value: `$${invoiceAmount}`, inline: true },
-          { name: 'İçerik / Detay', value: message.content || 'Görsel/Dosya Gönderildi' }
-        )
-        .setTimestamp();
-
-      if (message.attachments.size > 0) {
-        embed.setImage(message.attachments.first().url);
-      }
-
-      await logChannel.send({ embeds: [embed] });
-
-      const currentAmount = userInvoices.get(message.author.id) || 0;
-      const currentCount = userInvoiceCounts.get(message.author.id) || 0;
-
-      userInvoices.set(message.author.id, currentAmount + invoiceAmount);
-      userInvoiceCounts.set(message.author.id, currentCount + 1);
-    }
-
-    try {
-      await message.delete();
-    } catch (err) {
-      console.error('Mesaj silinemedi:', err);
-    }
-    return;
-  }
-
-  // --- YÖNETİCİ VE SİSTEM KOMUTLARI ---
-  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-  const args = message.content.trim().split(/ +/);
-  const command = args[0].toLowerCase();
-
-  // Mazeret Kanalı Şablon Kurma Komutu (!kur-mazeret-sablon)
-  if (command === '!kur-mazeret-sablon') {
-    const mazeretChannel = message.guild.channels.cache.get(CONFIG.MAZERET_CHANNEL_ID) || message.channel;
-
-    const sablonEmbed = new EmbedBuilder()
-      .setTitle('📚 AKADEMİ DERS MAZERET BİLDİRİM FORMU')
-      .setColor('#ff9900')
-      .setDescription(
-        'Eğitim ve Akademi derslerine katılım sağlayamayacak kişilerin mazeretlerini aşağıdaki formata uygun olarak bu kanala yazmaları gerekmektedir.\n\n' +
-        '📌 **Mazeret Bildirim Formatı:**\n' +
-        '```\n' +
-        'Ad Soyad / Rütbe: \n' +
-        'Katılamayacağı Ders / Saat: \n' +
-        'Mazeret / Katılamama Sebebi: \n' +
-        '
+          components:
