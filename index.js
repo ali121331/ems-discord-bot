@@ -1293,7 +1293,6 @@ client.on('interactionCreate', async (interaction) => {
               const durationMs = Date.now() - shift.startTime;
               const pastTotal = totalShifts.get(user.id) || 0;
               totalShifts.set(user.id, pastTotal + durationMs);
-      await saveUserData(user.id);
               await saveUserData(user.id);
 
               activeShifts.delete(user.id);
@@ -1353,6 +1352,7 @@ client.on('interactionCreate', async (interaction) => {
       const durationMs = Date.now() - shift.startTime;
       const pastTotal = totalShifts.get(user.id) || 0;
       totalShifts.set(user.id, pastTotal + durationMs);
+      await saveUserData(user.id);
 
       activeShifts.delete(user.id);
 
