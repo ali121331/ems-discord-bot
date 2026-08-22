@@ -314,6 +314,25 @@ async function updateEgitmenPanel(guild) {
 
 client.once('ready', () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
+  console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
+  console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
+});
+
+client.on('error', (error) => {
+  console.error('[DISCORD CLIENT ERROR]', error);
+});
+
+client.on('shardError', (error) => {
+  console.error('[DISCORD SHARD ERROR]', error);
+});
+
+client.on('warn', (info) => {
+  console.warn('[DISCORD WARN]', info);
+});
+
+client.on('debug', (info) => {
+  // Gateway bağlantısını teşhis etmek için açık bırakıldı.
+  console.log('[DISCORD DEBUG]', info);
 });
 
 // Otomatik Rol ve Hoş Geldin Mesajı
@@ -1590,4 +1609,15 @@ process.on('unhandledRejection', error => {
 process.on('uncaughtException', error => {
     console.error('Kritik Sistem Hatası:', error);
 });
-client.login(CONFIG.TOKEN);
+if (!CONFIG.TOKEN) {
+  console.error('[BOT] KRİTİK: TOKEN environment variable bulunamadı. Render > Environment > TOKEN kontrol edilmeli.');
+} else {
+  console.log('[BOT] TOKEN bulundu. Discord login başlatılıyor...');
+  client.login(CONFIG.TOKEN)
+    .then(() => {
+      console.log('[BOT] client.login() başarılı şekilde tamamlandı. Ready eventi bekleniyor...');
+    })
+    .catch((error) => {
+      console.error('[BOT] Discord login başarısız:', error);
+    });
+}
