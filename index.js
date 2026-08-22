@@ -33,7 +33,7 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GSCkSU.eJlesNVd52xw7YDKkDFl9YDw3b10yNQhioJfRo',
+  TOKEN: process.env.TOKEN, // Token Render Environment Variables üzerinden güvenli şekilde çekilir
   GUILD_ID: '', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
@@ -45,9 +45,20 @@ const CONFIG = {
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
-  // MAZERET BİLDİRİM VE İZİN SİSTEMİ
+  // RANDEVU SİSTEMİ LOG KANALI
+  RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
+  
+  // YENİ: DOKTOR MÜSAİTLİK KANALI
+  DOKTOR_MUSAITLIK_CHANNEL_ID: '1540511510286311504',
+
+  // AKADEMİ MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', 
   MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   
+  
+  // NORMAL PERSONEL MAZERET BİLDİRİM SİSTEMİ
+  NORMAL_MAZERET_YAZMA_CHANNEL_ID: '1540108129063276644',
+  NORMAL_MAZERET_LOG_CHANNEL_ID: '1540403175658496073',
+
   AKADEMI_SORUMLUSU_ROLE_ID: '1540116919833722920',
   TIP_EGITMENI_ROLE_ID: '1540117162838982656',
   IZINLI_PERSONEL_ROLE_ID: '1463553957358993515',
@@ -384,12 +395,12 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  // --- 2. DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  // --- 2. AKADEMİ DERS MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.MAZERET_YAZMA_CHANNEL_ID) {
-    const msgId = message.id; // Benzersiz Takip ID'si
+    const msgId = message.id;
 
     const mazeretEmbed = new EmbedBuilder()
-      .setTitle('📥 Yeni Ders Mazeret Bildirimi')
+      .setTitle('📥 Yeni Akademi Ders Mazeret Bildirimi')
       .setColor('#ff9900')
       .addFields(
         { name: 'Gönderen Personel', value: `${message.author} (${message.author.tag})`, inline: true },
@@ -414,7 +425,6 @@ client.on('messageCreate', async (message) => {
         .setStyle(ButtonStyle.Danger)
     );
 
-    // 1. Mazeret Bildirim Kanalına Gönder
     const logChannel = message.guild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
     if (logChannel) {
       await logChannel.send({
@@ -424,7 +434,6 @@ client.on('messageCreate', async (message) => {
       });
     }
 
-    // 2. Akademi Sorumlularına Özel DM Gönder
     try {
       await message.guild.members.fetch();
       const akademiSorumlulari = message.guild.members.cache.filter(m => 
@@ -438,19 +447,58 @@ client.on('messageCreate', async (message) => {
             embeds: [mazeretEmbed],
             components: [row]
           });
-        } catch (dmErr) {
-          console.log(`${sorumlu.user.tag} kullanıcısına DM atılamadı (DM Kapalı).`);
-        }
+        } catch (dmErr) {}
       });
-    } catch (err) {
-      console.error('Akademi sorumlularına DM gönderilirken hata oluştu:', err);
+    } catch (err) {}
+
+    try { await message.delete(); } catch (err) {}
+    return;
+  }
+
+  // --- 3. NORMAL PERSONEL MAZERET BİLDİRİ KANALI İŞLEMLERİ ---
+  if (message.channel.id === CONFIG.NORMAL_MAZERET_YAZMA_CHANNEL_ID) {
+    const msgId = message.id;
+
+    const mazeretEmbed = new EmbedBuilder()
+      .setTitle('📋 Yeni Personel Mazeret Bildirimi')
+      .setColor('#ffaa00')
+      .addFields(
+        { name: 'Gönderen Personel', value: `${message.author} (${message.author.tag})`, inline: true },
+        { name: 'Personel ID', value: `${message.author.id}`, inline: true },
+        { name: 'Mazeret Detayı', value: message.content || 'Görsel/Dosya Gönderildi' }
+      )
+      .setFooter({ text: `Normal Mazeret ID: ${msgId}` })
+      .setTimestamp();
+
+    if (message.attachments.size > 0) {
+      mazeretEmbed.setImage(message.attachments.first().url);
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`btn_norm_mazeret_onay_${message.author.id}_${msgId}`)
+        .setLabel('Onayla & İzin Ver')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`btn_norm_mazeret_red_${message.author.id}_${msgId}`)
+        .setLabel('Mazereti Reddet')
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    const logChannel = message.guild.channels.cache.get(CONFIG.NORMAL_MAZERET_LOG_CHANNEL_ID);
+    if (logChannel) {
+      await logChannel.send({
+        content: `📌 **Yeni Personel Mazeret Bildirimi:** ${message.author}`,
+        embeds: [mazeretEmbed],
+        components: [row]
+      });
     }
 
     try { await message.delete(); } catch (err) {}
     return;
   }
 
-  // --- 3. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
+  // --- 4. TEDAVİ ÜCRET KANALI İŞLEMLERİ ---
   if (message.channel.id === CONFIG.TEDAVI_UCRET_CHANNEL_ID) {
     const logChannel = message.guild.channels.cache.get(CONFIG.FATURA_LOG_CHANNEL_ID);
 
@@ -498,6 +546,74 @@ client.on('messageCreate', async (message) => {
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
+  // YENİ: DOKTOR MÜSAİTLİK PANELİ KURMA KOMUTU
+  if (command === '!kur-musaitlik') {
+    const musaitlikEmbed = new EmbedBuilder()
+      .setTitle('👨‍⚕️ Doktor Müsaitlik Bildirim Paneli')
+      .setDescription('Kıymetli doktorlarımız, hastaların poliklinik randevusu alabilmesi için görev yeriniz ve müsait olduğunuz tarih aralıklarını aşağıdaki butonu kullanarak bildiriniz. Bu veriler Müsaitlik Kanalı üzerinden şeffaf şekilde takip edilecektir.')
+      .setColor('#00ffcc')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_musaitlik_bildir')
+      .setLabel('Müsaitlik Bildir')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🕒');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+    const channel = message.guild.channels.cache.get(CONFIG.DOKTOR_MUSAITLIK_CHANNEL_ID) || message.channel;
+
+    await channel.send({ embeds: [musaitlikEmbed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // RANDEVU PANELİ KURMA KOMUTU
+  if (command === '!kur-randevu') {
+    const randevuEmbed = new EmbedBuilder()
+      .setTitle('🏥 Hastane Randevu Sistemi')
+      .setDescription('Poliklinik randevusu oluşturmak için aşağıdaki "Randevu Al" butonuna tıklayarak formu eksiksiz şekilde doldurunuz. Talebiniz en kısa sürede yetkililerimize iletilecektir.')
+      .setColor('#0099ff')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_randevu_al')
+      .setLabel('Randevu Al')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('📅');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+
+    await message.channel.send({ embeds: [randevuEmbed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // DM ÜZERİNDEN RANDEVU PANELİ GÖNDERME KOMUTU
+  if (command === '!randevu-gonder') {
+    const targetUser = message.mentions.users.first() || client.users.cache.get(args[1]);
+    if (!targetUser) return message.reply('❌ **Hatalı kullanım:** Lütfen bir kullanıcı etiketleyin veya ID girin. (Örn: `!randevu-gonder @Vatandaş`)');
+
+    const randevuEmbed = new EmbedBuilder()
+      .setTitle('🏥 Hastane Randevu Sistemi')
+      .setDescription('Hastanemizden randevu almak için aşağıdaki butona tıklayarak formu doldurunuz.')
+      .setColor('#0099ff')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_randevu_al')
+      .setLabel('Randevu Al')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('📅');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+
+    try {
+      await targetUser.send({ embeds: [randevuEmbed], components: [row] });
+      await message.reply(`✅ Randevu paneli ${targetUser} adlı kullanıcıya DM üzerinden başarıyla gönderildi.`);
+    } catch (error) {
+      await message.reply(`❌ ${targetUser} adlı kullanıcının DM kutusu kapalı olduğu için mesaj gönderilemedi.`);
+    }
+  }
+
   if (command === '!kur-isim-sablon') {
     const nameChannel = message.guild.channels.cache.get(CONFIG.NAME_CHANGE_CHANNEL_ID) || message.channel;
 
@@ -542,6 +658,30 @@ client.on('messageCreate', async (message) => {
       .setTimestamp();
 
     await mazeretChannel.send({ embeds: [sablonEmbed] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  if (command === '!kur-normal-mazeret-sablon') {
+    const normalMazeretChannel = message.guild.channels.cache.get(CONFIG.NORMAL_MAZERET_YAZMA_CHANNEL_ID) || message.channel;
+
+    const sablonEmbed = new EmbedBuilder()
+      .setTitle('📋 EMS PERSONEL MAZERET BİLDİRİM FORMU')
+      .setColor('#ffaa00')
+      .setDescription(
+        `Mesai, nöbet, toplantı veya aktif görevlere katılım sağlayamayacak tüm personellerin mazeretlerini aşağıdaki formata uygun olarak bu kanala bildirmesi gerekmektedir.\n\n` +
+        `📌 **Mazeret Bildirim Formatı:**\n` +
+        `\`\`\`\n` +
+        `Ad Soyad / Rütbe: \n` +
+        `Mazeretli Olunan Tarih / Saat Aralığı: \n` +
+        `Mazeret Türü (Nöbet / Mesai / Toplantı / Ailevi): \n` +
+        `Mazeret / Açıklama: \n` +
+        `\`\`\`\n` +
+        `⚠️ *Gelen mazeret bildirimleri üst yönetimin onayına düşecek ve değerlendirme sonucu tarafınıza DM ile iletilecektir.*`
+      )
+      .setImage(CONFIG.IMAGE_URL)
+      .setTimestamp();
+
+    await normalMazeretChannel.send({ embeds: [sablonEmbed] });
     try { await message.delete(); } catch (e) {}
   }
 
@@ -733,6 +873,45 @@ client.on('messageCreate', async (message) => {
 
     return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
   }
+
+  if (command === '!fatura-sıfırla' || command === '!fatura-sifirla') {
+    const targetUser = message.mentions.users.first();
+    const param = args[1]?.toLowerCase();
+
+    if (param === 'hepsi' || param === 'tümü' || param === 'tumu') {
+      userInvoices.clear();
+      userInvoiceCounts.clear();
+      return message.reply('✅ **Tüm kullanıcıların fatura verileri ve sayıları başarıyla sıfırlandı.**');
+    }
+
+    if (targetUser) {
+      userInvoices.delete(targetUser.id);
+      userInvoiceCounts.delete(targetUser.id);
+      return message.reply(`✅ ${targetUser} kullanıcısının tüm fatura verileri başarıyla sıfırlandı.`);
+    }
+
+    return message.reply('❌ **Hatalı kullanım!**\n• Belirli bir üye için: `!fatura-sıfırla @Kullanıcı`\n• Tüm sunucu için: `!fatura-sıfırla hepsi`');
+  }
+
+  if (command === '!fatura-sil' || command === '!fatura-cikar') {
+    const targetUser = message.mentions.users.first();
+    const removeAmount = parseFloat(args[2]);
+
+    if (!targetUser || isNaN(removeAmount) || removeAmount <= 0) {
+      return message.reply('❌ **Hatalı kullanım!** Örnek: `!fatura-sil @Kullanıcı 5000`');
+    }
+
+    const currentAmount = userInvoices.get(targetUser.id) || 0;
+    const currentCount = userInvoiceCounts.get(targetUser.id) || 0;
+
+    const newAmount = Math.max(0, currentAmount - removeAmount);
+    const newCount = Math.max(0, currentCount - 1);
+
+    userInvoices.set(targetUser.id, newAmount);
+    userInvoiceCounts.set(targetUser.id, newCount);
+
+    return message.reply(`✅ ${targetUser} kullanıcısından **$${removeAmount}** tutarında fatura düşüldü.\n• Güncel Fatura Tutarı: **$${newAmount}**\n• Güncel Fatura Adedi: **${newCount}**`);
+  }
 });
 
 // ETKİLEŞİM DİNLEYİCİSİ (BUTONLAR & MODALLAR)
@@ -741,11 +920,143 @@ client.on('interactionCreate', async (interaction) => {
   // --- 1. BUTON TIKLAMALARI ---
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
+    
+    // YENİ: DOKTOR MÜSAİTLİK BİLDİRİM FORMU
+    if (customId === 'btn_musaitlik_bildir') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_musaitlik_bildir')
+        .setTitle('Müsaitlik Bildirim Formu');
 
-    // --- AKADEMİ SORUMLUSU ONAY / RED BUTON TIKLAMASI ---
-    if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_')) {
+      const gunInput = new TextInputBuilder()
+        .setCustomId('musait_gun')
+        .setLabel('Hangi Gün Müsait Olacaksınız?')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Bugün, Yarın, 25 Ekim Pazartesi vb.')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const saatInput = new TextInputBuilder()
+        .setCustomId('musait_saat')
+        .setLabel('Müsait Olduğunuz Saat Aralığı')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 14:00 - 18:00 arası')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const polInput = new TextInputBuilder()
+        .setCustomId('musait_poliklinik')
+        .setLabel('Bulunacağınız Poliklinik / Birim')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Genel Cerrahi Polikliniği')
+        .setRequired(true)
+        .setMaxLength(100);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(gunInput),
+        new ActionRowBuilder().addComponents(saatInput),
+        new ActionRowBuilder().addComponents(polInput)
+      );
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // RANDEVU ALMA BUTONU (Form açar)
+    if (customId === 'btn_randevu_al') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_randevu_al')
+        .setTitle('Randevu Formu');
+
+      const isimInput = new TextInputBuilder()
+        .setCustomId('randevu_isim')
+        .setLabel('Adınız ve Soyadınız')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const telefonInput = new TextInputBuilder()
+        .setCustomId('randevu_telefon')
+        .setLabel('IC Telefon Numaranız')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 555-1234')
+        .setRequired(true)
+        .setMaxLength(15);
+
+      const bolumInput = new TextInputBuilder()
+        .setCustomId('randevu_bolum')
+        .setLabel('Talep Edilen Bölüm / Doktor')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Genel Cerrahi / Dr. John')
+        .setRequired(true)
+        .setMaxLength(100);
+
+      const tarihInput = new TextInputBuilder()
+        .setCustomId('randevu_tarih')
+        .setLabel('Uygun Olduğunuz Tarih ve Saat')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 25.10.2023 - 14:30')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const sikayetInput = new TextInputBuilder()
+        .setCustomId('randevu_sikayet')
+        .setLabel('Şikayetiniz veya Mazeretiniz')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Şikayetinizi kısaca özetleyiniz...')
+        .setRequired(true)
+        .setMaxLength(500);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(isimInput),
+        new ActionRowBuilder().addComponents(telefonInput),
+        new ActionRowBuilder().addComponents(bolumInput),
+        new ActionRowBuilder().addComponents(tarihInput),
+        new ActionRowBuilder().addComponents(sikayetInput)
+      );
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // YETKİLİ RANDEVU ONAY / RED BUTONLARI (Form açar)
+    if (customId.startsWith('btn_randevu_onay_') || customId.startsWith('btn_randevu_red_')) {
+      if (interaction.message && interaction.message.components.length > 0) {
+        const firstBtn = interaction.message.components[0].components[0];
+        if (firstBtn && firstBtn.disabled) {
+          return interaction.reply({
+            content: '❌ **Bu randevu talebi zaten daha önce bir yetkili tarafından yanıtlanmış!**',
+            ephemeral: true
+          });
+        }
+      }
+
+      const isApproved = customId.startsWith('btn_randevu_onay_');
+      const parts = customId.split('_');
+      const patientId = parts[parts.length - 2];
+      const randevuId = parts[parts.length - 1];
+
+      const modalCustomId = isApproved ? `modal_randevu_onay_${patientId}_${randevuId}` : `modal_randevu_red_${patientId}_${randevuId}`;
+
+      const modal = new ModalBuilder()
+        .setCustomId(modalCustomId)
+        .setTitle(isApproved ? 'Randevu Onay Formu' : 'Randevu Red Formu');
+
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('randevu_yanit_input')
+        .setLabel(isApproved ? 'Onay Notu / Randevu Saati Teyidi' : 'Reddedilme Sebebi')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder(isApproved ? 'Örn: Randevunuz onaylanmıştır, belirtilen saatte Poliklinik 2 servisinde olunuz.' : 'Örn: İlgili poliklinik belirtilen saatte dolu.')
+        .setRequired(true)
+        .setMaxLength(500);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // --- AKADEMİ VEYA NORMAL PERSONEL MAZERET ONAY/RED BUTONU ---
+    if (customId.startsWith('btn_mazeret_onay_') || customId.startsWith('btn_mazeret_red_') || customId.startsWith('btn_norm_mazeret_onay_') || customId.startsWith('btn_norm_mazeret_red_')) {
       
-      // Mesaj zaten işlenmiş mi kontrol et
       if (interaction.message && interaction.message.components.length > 0) {
         const firstBtn = interaction.message.components[0].components[0];
         if (firstBtn && firstBtn.disabled) {
@@ -756,36 +1067,16 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
-      if (!targetGuild) {
-        return interaction.reply({ content: '❌ Sunucu verilerine erişilemedi.', ephemeral: true });
-      }
-
-      let authorizingMember;
-      try {
-        authorizingMember = await targetGuild.members.fetch(user.id);
-      } catch (e) {
-        return interaction.reply({ content: '❌ Sunucudaki üyeliğiniz doğrulanamadı.', ephemeral: true });
-      }
-
-      const isAkademiSorumlusu = authorizingMember.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) || 
-                                 authorizingMember.permissions.has(PermissionFlagsBits.Administrator);
-
-      if (!isAkademiSorumlusu) {
-        return interaction.reply({
-          content: '❌ **Mazeret taleplerini yalnızca Akademi Sorumluları ve Yöneticiler yanıtlayabilir!**',
-          ephemeral: true
-        });
-      }
-
+      const isNormal = customId.startsWith('btn_norm_mazeret_');
+      const actionType = customId.includes('_onay_') ? 'onay' : 'red';
       const parts = customId.split('_');
-      const actionType = parts[2]; // 'onay' veya 'red'
-      const studentId = parts[3];
-      const mazeretId = parts[4] || '0';
+      const studentId = parts[parts.length - 2];
+      const mazeretId = parts[parts.length - 1];
 
-      // MODAL (SEBEP PENCERESİ) AÇ
+      const modalCustomId = isNormal ? `modal_norm_mazeret_${actionType}_${studentId}_${mazeretId}` : `modal_mazeret_${actionType}_${studentId}_${mazeretId}`;
+
       const modal = new ModalBuilder()
-        .setCustomId(`modal_mazeret_${actionType}_${studentId}_${mazeretId}`)
+        .setCustomId(modalCustomId)
         .setTitle(actionType === 'onay' ? 'Mazeret Onay Sebebi' : 'Mazeret Red Sebebi');
 
       const reasonInput = new TextInputBuilder()
@@ -1018,12 +1309,174 @@ client.on('interactionCreate', async (interaction) => {
   // --- 2. MODAL (FORM) GÖNDERİMLERİ ---
   if (interaction.isModalSubmit()) {
     const { customId, user, guild } = interaction;
+    
+    // YENİ: MÜSAİTLİK FORMUNUN YANITLANMASI
+    if (customId === 'modal_musaitlik_bildir') {
+      const gun = interaction.fields.getTextInputValue('musait_gun');
+      const saat = interaction.fields.getTextInputValue('musait_saat');
+      const pol = interaction.fields.getTextInputValue('musait_poliklinik');
 
-    if (customId.startsWith('modal_mazeret_')) {
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      const channel = targetGuild?.channels.cache.get(CONFIG.DOKTOR_MUSAITLIK_CHANNEL_ID);
+
+      if (!channel) {
+        return interaction.reply({ content: '❌ Müsaitlik kanalı bulunamadı. Lütfen yöneticilere bildiriniz.', ephemeral: true });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('🟢 Doktor Müsaitlik Bildirimi')
+        .setColor('#00ff00')
+        .setThumbnail(user.displayAvatarURL())
+        .addFields(
+          { name: '👨‍⚕️ Doktor', value: `${user}`, inline: true },
+          { name: '🏥 Birim/Poliklinik', value: pol, inline: true },
+          { name: '📅 Müsait Olunan Gün', value: gun, inline: false },
+          { name: '🕒 Saat Aralığı', value: saat, inline: false }
+        )
+        .setTimestamp();
+
+      const row = new ActionRowBuilder().addComponents(
+         new ButtonBuilder()
+           .setCustomId('disabled_musaitlik_bilgi')
+           .setLabel('Aktif Müsaitlik')
+           .setStyle(ButtonStyle.Secondary)
+           .setDisabled(true)
+           .setEmoji('🩺')
+      );
+
+      try {
+        await channel.send({ embeds: [embed], components: [row] });
+        return interaction.reply({ content: '✅ Müsaitlik durumunuz hastalar ve yönetim için başarıyla paylaşıldı.', ephemeral: true });
+      } catch (err) {
+        console.error('Müsaitlik gönderilirken hata:', err);
+        return interaction.reply({ content: '❌ Müsaitlik bildirilirken bir hata oluştu.', ephemeral: true });
+      }
+    }
+
+    // RANDEVU FORMUNUN YANITLANMASI (VATANDAŞ TARAFINDAN GÖNDERİLEN)
+    if (customId === 'modal_randevu_al') {
+      const isim = interaction.fields.getTextInputValue('randevu_isim');
+      const telefon = interaction.fields.getTextInputValue('randevu_telefon');
+      const bolum = interaction.fields.getTextInputValue('randevu_bolum');
+      const tarih = interaction.fields.getTextInputValue('randevu_tarih');
+      const sikayet = interaction.fields.getTextInputValue('randevu_sikayet');
+      const randevuId = Date.now().toString().slice(-6);
+
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      const randevuKanal = targetGuild?.channels.cache.get(CONFIG.RANDEVU_LOG_CHANNEL_ID);
+
+      if (!randevuKanal) {
+        return interaction.reply({ 
+          content: '❌ **Randevu kanalı bulunamadı.** Sistem yöneticisine bildiriniz (RANDEVU_LOG_CHANNEL_ID eksik).', 
+          ephemeral: true 
+        });
+      }
+
+      const randevuEmbed = new EmbedBuilder()
+        .setTitle('📅 Yeni Randevu Talebi')
+        .setColor('#0099ff')
+        .addFields(
+          { name: '👤 Hasta Bilgisi', value: `${isim} (${user})\n📞 **Tel:** ${telefon}`, inline: false },
+          { name: '🏥 İstenilen Bölüm / Doktor', value: bolum, inline: true },
+          { name: '🕒 Talep Edilen Tarih', value: tarih, inline: true },
+          { name: '📝 Şikayet / Detay', value: sikayet, inline: false }
+        )
+        .setFooter({ text: `Randevu ID: ${randevuId}` })
+        .setTimestamp();
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`btn_randevu_onay_${user.id}_${randevuId}`)
+          .setLabel('Randevuyu Onayla')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`btn_randevu_red_${user.id}_${randevuId}`)
+          .setLabel('Randevuyu Reddet')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      try {
+        await randevuKanal.send({ content: `📌 **Yeni bir randevu talebi ulaştı!** ${user}`, embeds: [randevuEmbed], components: [row] });
+        return interaction.reply({ content: '✅ Randevu talebiniz başarıyla alındı ve yetkililere iletildi. Geçmiş olsun!', ephemeral: true });
+      } catch (err) {
+        console.error('Randevu loglanırken hata:', err);
+        return interaction.reply({ content: '❌ Randevunuz iletilirken bir sorun oluştu.', ephemeral: true });
+      }
+    }
+
+    // YETKİLİNİN RANDEVUYU ONAYLAMASI VEYA REDDETMESİ
+    if (customId.startsWith('modal_randevu_onay_') || customId.startsWith('modal_randevu_red_')) {
+      const isApproved = customId.startsWith('modal_randevu_onay_');
       const parts = customId.split('_');
-      const actionType = parts[2]; // 'onay' veya 'red'
-      const studentId = parts[3];
-      const mazeretId = parts[4];
+      const patientId = parts[parts.length - 2];
+      const randevuId = parts[parts.length - 1];
+      const note = interaction.fields.getTextInputValue('randevu_yanit_input');
+
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      if (!targetGuild) return interaction.reply({ content: '❌ Sunucuya erişilemedi.', ephemeral: true });
+
+      try {
+        const patientUser = await client.users.fetch(patientId);
+
+        const color = isApproved ? '#00ff00' : '#ff0000';
+        const statusTitle = isApproved ? '✅ RANDEVU ONAYLANDI' : '❌ RANDEVU REDDEDİLDİ';
+
+        // HASTAYA DM GÖNDERİMİ
+        const patientDmEmbed = new EmbedBuilder()
+          .setTitle(`🏥 Randevu Talebiniz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
+          .setColor(color)
+          .addFields(
+            { name: 'İlgilenen Yetkili / Doktor', value: `${user.tag}`, inline: true },
+            { name: 'Durum', value: isApproved ? '✅ Randevunuz Kesinleşti' : '❌ Randevunuz Oluşturulamadı', inline: true },
+            { name: isApproved ? 'Randevu Notu / Açıklama' : 'Red Sebebi', value: note, inline: false }
+          )
+          .setTimestamp();
+
+        await patientUser.send({ embeds: [patientDmEmbed] }).catch(() => {});
+
+        // LOG KANALINDA BUTONLARI DEVRE DIŞI BIRAK VE EMBED'İ GÜNCELLE
+        const disabledRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('disabled_randevu_status')
+            .setLabel(`${statusTitle} (${user.username})`)
+            .setStyle(isApproved ? ButtonStyle.Success : ButtonStyle.Danger)
+            .setDisabled(true)
+        );
+
+        const logChannel = targetGuild.channels.cache.get(CONFIG.RANDEVU_LOG_CHANNEL_ID);
+        if (logChannel) {
+          const fetchedMsgs = await logChannel.messages.fetch({ limit: 50 });
+          const logMsg = fetchedMsgs.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(randevuId));
+
+          if (logMsg) {
+            const updatedEmbed = EmbedBuilder.from(logMsg.embeds[0])
+              .setColor(color)
+              .addFields(
+                { name: '⚡ İşlem Durumu', value: `**${statusTitle}** (${user.tag})`, inline: true },
+                { name: isApproved ? 'Onay Notu' : 'Gerekçe', value: note, inline: false }
+              );
+
+            await logMsg.edit({ embeds: [updatedEmbed], components: [disabledRow] });
+          }
+        }
+
+        return interaction.reply({
+          content: `✅ Randevu talebi başarıyla **${isApproved ? 'ONAYLANDI' : 'REDDEDİLDİ'}**.\n**Not/Gerekçe:** ${note}`,
+          ephemeral: true
+        });
+
+      } catch (err) {
+        console.error('Randevu onay/red modal hatası:', err);
+        return interaction.reply({ content: '❌ İşlem gerçekleştirilirken bir hata oluştu.', ephemeral: true });
+      }
+    }
+
+    if (customId.startsWith('modal_mazeret_') || customId.startsWith('modal_norm_mazeret_')) {
+      const isNormal = customId.startsWith('modal_norm_mazeret_');
+      const parts = customId.split('_');
+      const actionType = parts[parts.length - 3];
+      const studentId = parts[parts.length - 2];
+      const mazeretId = parts[parts.length - 1];
       const reason = interaction.fields.getTextInputValue('mazeret_sebep_input');
 
       const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
@@ -1045,9 +1498,9 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // ÖĞRENCİYE BİLDİRİM DM'İ GÖNDER
+        // PERSONELE DM BİLDİRİMİ GÖNDER
         const userDmEmbed = new EmbedBuilder()
-          .setTitle(`📑 Ders Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
+          .setTitle(isNormal ? `📋 Personel Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}` : `📑 Akademi Ders Mazeret Bildiriminiz ${isApproved ? 'Onaylandı' : 'Reddedildi'}`)
           .setColor(color)
           .addFields(
             { name: 'Değerlendiren Yetkili', value: `${user.tag}`, inline: true },
@@ -1058,7 +1511,6 @@ client.on('interactionCreate', async (interaction) => {
 
         await targetMember.send({ embeds: [userDmEmbed] }).catch(() => {});
 
-        // BUTONU PASİF YAPMA COMPONENT'I
         const disabledRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId('disabled_status')
@@ -1067,8 +1519,9 @@ client.on('interactionCreate', async (interaction) => {
             .setDisabled(true)
         );
 
-        // 1. SUNUCU LOG KANALINDAKİ MESAJI BUL VE GÜNCELLE
-        const logChannel = targetGuild.channels.cache.get(CONFIG.MAZERET_LOG_CHANNEL_ID);
+        // LOG KANALINDAKİ MESAJI GÜNCELLE
+        const targetLogChannelId = isNormal ? CONFIG.NORMAL_MAZERET_LOG_CHANNEL_ID : CONFIG.MAZERET_LOG_CHANNEL_ID;
+        const logChannel = targetGuild.channels.cache.get(targetLogChannelId);
         if (logChannel) {
           try {
             const fetchedLogMsgs = await logChannel.messages.fetch({ limit: 50 });
@@ -1089,32 +1542,34 @@ client.on('interactionCreate', async (interaction) => {
           }
         }
 
-        // 2. AKADEMİ SORUMLULARININ DM KUTULARINDAKİ MESAJLARI TARAYIP DÜZELT
-        try {
-          const akademiSorumlulari = targetGuild.members.cache.filter(m => 
-            m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
-          );
+        // EĞER AKADEMİ MAZERETİ İSE AKADEMİ SORUMLULARININ DM'LERİNİ DÜZELT
+        if (!isNormal) {
+          try {
+            const akademiSorumlulari = targetGuild.members.cache.filter(m => 
+              m.roles.cache.has(CONFIG.AKADEMI_SORUMLUSU_ROLE_ID) && !m.user.bot
+            );
 
-          for (const [id, sorumluMember] of akademiSorumlulari) {
-            try {
-              const dmChannel = await sorumluMember.createDM();
-              const dmMessages = await dmChannel.messages.fetch({ limit: 20 });
-              const targetDmMsg = dmMessages.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
+            for (const [id, sorumluMember] of akademiSorumlulari) {
+              try {
+                const dmChannel = await sorumluMember.createDM();
+                const dmMessages = await dmChannel.messages.fetch({ limit: 20 });
+                const targetDmMsg = dmMessages.find(m => m.embeds.length > 0 && m.embeds[0].footer?.text?.includes(mazeretId));
 
-              if (targetDmMsg) {
-                const updatedDmEmbed = EmbedBuilder.from(targetDmMsg.embeds[0])
-                  .setColor(color)
-                  .addFields(
-                    { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
-                    { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
-                  );
+                if (targetDmMsg) {
+                  const updatedDmEmbed = EmbedBuilder.from(targetDmMsg.embeds[0])
+                    .setColor(color)
+                    .addFields(
+                      { name: '⚡ Durum', value: `**${statusTitle}** (${user.tag})`, inline: true },
+                      { name: isApproved ? 'Açıklama' : 'Gerekçe / Nedeni', value: reason, inline: false }
+                    );
 
-                await targetDmMsg.edit({ embeds: [updatedDmEmbed], components: [disabledRow] });
-              }
-            } catch (dmErr) {}
+                  await targetDmMsg.edit({ embeds: [updatedDmEmbed], components: [disabledRow] });
+                }
+              } catch (dmErr) {}
+            }
+          } catch (e) {
+            console.error('DM güncellemeleri yapılırken hata:', e);
           }
-        } catch (e) {
-          console.error('DM güncellemeleri yapılırken hata:', e);
         }
 
         return interaction.reply({
@@ -1129,5 +1584,10 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
-
+process.on('unhandledRejection', error => {
+    console.error('Yakalanmayan Hata:', error);
+});
+process.on('uncaughtException', error => {
+    console.error('Kritik Sistem Hatası:', error);
+});
 client.login(CONFIG.TOKEN);
