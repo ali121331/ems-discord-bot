@@ -1584,5 +1584,10 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
-
+process.on('unhandledRejection', error => {
+    console.error('Yakalanmayan Hata:', error);
+});
+process.on('uncaughtException', error => {
+    console.error('Kritik Sistem Hatası:', error);
+});
 client.login(CONFIG.TOKEN);
