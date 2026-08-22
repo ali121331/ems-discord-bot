@@ -115,8 +115,6 @@ const activeShifts = new Map();
 const totalShifts = new Map();
 const userInvoices = new Map(); 
 const userInvoiceCounts = new Map(); 
-let kadroUpdateTimeout = null;
-
 const SALARY_CONFIG = {
   HOURLY_RATE: 100,      
   INVOICE_PERCENT: 10    
@@ -353,25 +351,7 @@ client.on('guildMemberAdd', async (member) => {
   });
 });
 
-// OTOMATİK PANELLERİ GÜNCELLEME (KADRO & EĞİTMEN)
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  const oldRoles = oldMember.roles.cache.map(r => r.id).sort().join(',');
-  const newRoles = newMember.roles.cache.map(r => r.id).sort().join(',');
-
-  const hasNameChanged = oldMember.displayName !== newMember.displayName;
-  const hasRolesChanged = oldRoles !== newRoles;
-
-  if (!hasNameChanged && !hasRolesChanged) return;
-
-  if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
-
-  kadroUpdateTimeout = setTimeout(async () => {
-    console.log(`[OTOMATİK PANEL] ${newMember.user.tag} verisi değişti, tüm paneller güncelleniyor...`);
-    await updateKadroPanel(newMember.guild);
-    await updateEgitmenPanel(newMember.guild);
-  }, 2000);
-});
-
+// Kadro ve eğitmen panelleri yalnızca manuel komutlarla güncellenir.
 // KANAL VE MESAJ DİNLEME
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
@@ -701,8 +681,6 @@ client.on('messageCreate', async (message) => {
   }
 
   if (command === '!kadro-guncelle') {
-    if (kadroUpdateTimeout) clearTimeout(kadroUpdateTimeout);
-
     const success = await updateKadroPanel(message.guild);
     try { await message.delete(); } catch (e) {}
 
