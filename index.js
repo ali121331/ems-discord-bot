@@ -33,7 +33,7 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GaZU6Y.lXFJaS8ZW5xFsZ0gcDQi8qeoJimsTN6dR4vC48', // Token Render Environment Variables üzerinden güvenli şekilde çekilir
+  TOKEN: process.env.TOKEN, // Render/Railway Environment Variables üzerinden çekilir
   GUILD_ID: '1463553957019521206', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
@@ -312,7 +312,7 @@ async function updateEgitmenPanel(guild) {
   }
 }
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
   console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
   console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
@@ -1613,8 +1613,10 @@ if (!CONFIG.TOKEN) {
 }
 
 // ============================================================
-// DISCORD BAĞLANTI TEŞHİSİ
+// DISCORD BAĞLANTISI
 // ============================================================
+// Not: Geçici REST testleri kaldırıldı. Her açılışta /users/@me ve
+// /gateway/bot uçlarına gereksiz istek gönderilmez.
 
 client.on('shardReady', (shardId) => {
   console.log(`[GATEWAY] Shard ${shardId} HAZIR.`);
@@ -1630,109 +1632,14 @@ client.on('shardReconnecting', (shardId) => {
   console.log(`[GATEWAY] Shard ${shardId} yeniden bağlanıyor...`);
 });
 
-client.on('shardError', (error, shardId) => {
-  console.error(`[GATEWAY ERROR] Shard ${shardId}:`, error);
-});
+if (!CONFIG.TOKEN) {
+  console.error('[BOT] KRİTİK: TOKEN environment variable bulunamadı.');
+  console.error('[BOT] Hosting panelinde Environment/Variables bölümüne TOKEN ekleyin.');
+  process.exitCode = 1;
+} else {
+  console.log('[BOT] TOKEN bulundu. Discord bağlantısı başlatılıyor...');
 
-async function startBot() {
-  console.log('[TEST] Bot başlatma testi başladı.');
-
-  if (!CONFIG.TOKEN) {
-    console.error('[TEST] HATA: TOKEN bulunamadı!');
-    return;
-  }
-
-  console.log('[TEST] TOKEN environment variable bulundu.');
-
-  // 1. Discord REST API testi
-  try {
-    console.log('[TEST 1] Discord REST API bağlantısı test ediliyor...');
-
-    const response = await fetch(
-      'https://discord.com/api/v10/users/@me',
-      {
-        headers: {
-          Authorization: `Bot ${CONFIG.TOKEN}`
-        }
-      }
-    );
-
-    console.log(`[TEST 1] HTTP durum kodu: ${response.status}`);
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.error('[TEST 1] Discord REST HATASI:', body);
-      return;
-    }
-
-    const user = await response.json();
-
-    console.log(
-      `[TEST 1] BAŞARILI: Token geçerli. Bot: ${user.username} | ID: ${user.id}`
-    );
-
-  } catch (error) {
-    console.error('[TEST 1] Discord REST bağlantısı kurulamadı:', error);
-    return;
-  }
-
-  // 2. Discord Gateway URL testi
-  try {
-    console.log('[TEST 2] Discord Gateway adresi isteniyor...');
-
-    const gatewayResponse = await fetch(
-      'https://discord.com/api/v10/gateway/bot',
-      {
-        headers: {
-          Authorization: `Bot ${CONFIG.TOKEN}`
-        }
-      }
-    );
-
-    console.log(
-      `[TEST 2] HTTP durum kodu: ${gatewayResponse.status}`
-    );
-
-    const gatewayData = await gatewayResponse.json();
-
-    console.log(
-      '[TEST 2] Gateway cevabı:',
-      {
-        url: gatewayData.url,
-        shards: gatewayData.shards
-      }
-    );
-
-  } catch (error) {
-    console.error('[TEST 2] Gateway bilgisi alınamadı:', error);
-  }
-
-  // 3. discord.js login testi
-  try {
-    console.log('[TEST 3] discord.js client.login() başlatılıyor...');
-
-    const timeout = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(
-          new Error(
-            'DISCORD_LOGIN_TIMEOUT: 30 saniye içinde Discord bağlantısı kurulamadı.'
-          )
-        );
-      }, 30000);
-    });
-
-    const login = client.login(CONFIG.TOKEN);
-
-    await Promise.race([
-      login,
-      timeout
-    ]);
-
-    console.log('[TEST 3] client.login() tamamlandı.');
-
-  } catch (error) {
-    console.error('[TEST 3] LOGIN HATASI:', error);
-  }
+  client.login(CONFIG.TOKEN).catch((error) => {
+    console.error('[BOT] Discord giriş hatası:', error);
+  });
 }
-
-startBot();
