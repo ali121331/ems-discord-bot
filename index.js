@@ -330,10 +330,6 @@ client.on('warn', (info) => {
   console.warn('[DISCORD WARN]', info);
 });
 
-client.on('debug', (info) => {
-  // Gateway bağlantısını teşhis etmek için açık bırakıldı.
-  console.log('[DISCORD DEBUG]', info);
-});
 
 // Otomatik Rol ve Hoş Geldin Mesajı
 client.on('guildMemberAdd', async (member) => {
