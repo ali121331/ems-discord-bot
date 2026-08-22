@@ -45,9 +45,12 @@ const CONFIG = {
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   
-  // RANDEVU SİSTEMİ LOG KANALI (Buraya ID girilecek)
+  // RANDEVU SİSTEMİ LOG KANALI
   RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
   
+  // YENİ: DOKTOR MÜSAİTLİK KANALI
+  DOKTOR_MUSAITLIK_CHANNEL_ID: '1540511510286311504',
+
   // AKADEMİ MAZERET BİLDİRİM VE İZİN SİSTEMİ
   MAZERET_YAZMA_CHANNEL_ID: '1540109672625733642', 
   MAZERET_LOG_CHANNEL_ID: '1540397820769730641',   
@@ -543,7 +546,28 @@ client.on('messageCreate', async (message) => {
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
-  // YENİ: RANDEVU PANELİ KURMA KOMUTU
+  // YENİ: DOKTOR MÜSAİTLİK PANELİ KURMA KOMUTU
+  if (command === '!kur-musaitlik') {
+    const musaitlikEmbed = new EmbedBuilder()
+      .setTitle('👨‍⚕️ Doktor Müsaitlik Bildirim Paneli')
+      .setDescription('Kıymetli doktorlarımız, hastaların poliklinik randevusu alabilmesi için görev yeriniz ve müsait olduğunuz tarih aralıklarını aşağıdaki butonu kullanarak bildiriniz. Bu veriler Müsaitlik Kanalı üzerinden şeffaf şekilde takip edilecektir.')
+      .setColor('#00ffcc')
+      .setImage(CONFIG.IMAGE_URL);
+
+    const btn = new ButtonBuilder()
+      .setCustomId('btn_musaitlik_bildir')
+      .setLabel('Müsaitlik Bildir')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji('🕒');
+
+    const row = new ActionRowBuilder().addComponents(btn);
+    const channel = message.guild.channels.cache.get(CONFIG.DOKTOR_MUSAITLIK_CHANNEL_ID) || message.channel;
+
+    await channel.send({ embeds: [musaitlikEmbed], components: [row] });
+    try { await message.delete(); } catch (e) {}
+  }
+
+  // RANDEVU PANELİ KURMA KOMUTU
   if (command === '!kur-randevu') {
     const randevuEmbed = new EmbedBuilder()
       .setTitle('🏥 Hastane Randevu Sistemi')
@@ -563,7 +587,7 @@ client.on('messageCreate', async (message) => {
     try { await message.delete(); } catch (e) {}
   }
 
-  // YENİ: DM ÜZERİNDEN RANDEVU PANELİ GÖNDERME KOMUTU
+  // DM ÜZERİNDEN RANDEVU PANELİ GÖNDERME KOMUTU
   if (command === '!randevu-gonder') {
     const targetUser = message.mentions.users.first() || client.users.cache.get(args[1]);
     if (!targetUser) return message.reply('❌ **Hatalı kullanım:** Lütfen bir kullanıcı etiketleyin veya ID girin. (Örn: `!randevu-gonder @Vatandaş`)');
@@ -897,7 +921,47 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
     
-    // YENİ: RANDEVU ALMA BUTONU (Form açar)
+    // YENİ: DOKTOR MÜSAİTLİK BİLDİRİM FORMU
+    if (customId === 'btn_musaitlik_bildir') {
+      const modal = new ModalBuilder()
+        .setCustomId('modal_musaitlik_bildir')
+        .setTitle('Müsaitlik Bildirim Formu');
+
+      const gunInput = new TextInputBuilder()
+        .setCustomId('musait_gun')
+        .setLabel('Hangi Gün Müsait Olacaksınız?')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Bugün, Yarın, 25 Ekim Pazartesi vb.')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const saatInput = new TextInputBuilder()
+        .setCustomId('musait_saat')
+        .setLabel('Müsait Olduğunuz Saat Aralığı')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 14:00 - 18:00 arası')
+        .setRequired(true)
+        .setMaxLength(50);
+
+      const polInput = new TextInputBuilder()
+        .setCustomId('musait_poliklinik')
+        .setLabel('Bulunacağınız Poliklinik / Birim')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: Genel Cerrahi Polikliniği')
+        .setRequired(true)
+        .setMaxLength(100);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(gunInput),
+        new ActionRowBuilder().addComponents(saatInput),
+        new ActionRowBuilder().addComponents(polInput)
+      );
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // RANDEVU ALMA BUTONU (Form açar)
     if (customId === 'btn_randevu_al') {
       const modal = new ModalBuilder()
         .setCustomId('modal_randevu_al')
@@ -909,6 +973,14 @@ client.on('interactionCreate', async (interaction) => {
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(50);
+
+      const telefonInput = new TextInputBuilder()
+        .setCustomId('randevu_telefon')
+        .setLabel('IC Telefon Numaranız')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Örn: 555-1234')
+        .setRequired(true)
+        .setMaxLength(15);
 
       const bolumInput = new TextInputBuilder()
         .setCustomId('randevu_bolum')
@@ -936,6 +1008,7 @@ client.on('interactionCreate', async (interaction) => {
 
       modal.addComponents(
         new ActionRowBuilder().addComponents(isimInput),
+        new ActionRowBuilder().addComponents(telefonInput),
         new ActionRowBuilder().addComponents(bolumInput),
         new ActionRowBuilder().addComponents(tarihInput),
         new ActionRowBuilder().addComponents(sikayetInput)
@@ -945,7 +1018,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // YENİ: YETKİLİ RANDEVU ONAY / RED BUTONLARI (Form açar)
+    // YETKİLİ RANDEVU ONAY / RED BUTONLARI (Form açar)
     if (customId.startsWith('btn_randevu_onay_') || customId.startsWith('btn_randevu_red_')) {
       if (interaction.message && interaction.message.components.length > 0) {
         const firstBtn = interaction.message.components[0].components[0];
@@ -1236,10 +1309,54 @@ client.on('interactionCreate', async (interaction) => {
   // --- 2. MODAL (FORM) GÖNDERİMLERİ ---
   if (interaction.isModalSubmit()) {
     const { customId, user, guild } = interaction;
+    
+    // YENİ: MÜSAİTLİK FORMUNUN YANITLANMASI
+    if (customId === 'modal_musaitlik_bildir') {
+      const gun = interaction.fields.getTextInputValue('musait_gun');
+      const saat = interaction.fields.getTextInputValue('musait_saat');
+      const pol = interaction.fields.getTextInputValue('musait_poliklinik');
+
+      const targetGuild = guild || client.guilds.cache.get(CONFIG.GUILD_ID) || client.guilds.cache.first();
+      const channel = targetGuild?.channels.cache.get(CONFIG.DOKTOR_MUSAITLIK_CHANNEL_ID);
+
+      if (!channel) {
+        return interaction.reply({ content: '❌ Müsaitlik kanalı bulunamadı. Lütfen yöneticilere bildiriniz.', ephemeral: true });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('🟢 Doktor Müsaitlik Bildirimi')
+        .setColor('#00ff00')
+        .setThumbnail(user.displayAvatarURL())
+        .addFields(
+          { name: '👨‍⚕️ Doktor', value: `${user}`, inline: true },
+          { name: '🏥 Birim/Poliklinik', value: pol, inline: true },
+          { name: '📅 Müsait Olunan Gün', value: gun, inline: false },
+          { name: '🕒 Saat Aralığı', value: saat, inline: false }
+        )
+        .setTimestamp();
+
+      const row = new ActionRowBuilder().addComponents(
+         new ButtonBuilder()
+           .setCustomId('disabled_musaitlik_bilgi')
+           .setLabel('Aktif Müsaitlik')
+           .setStyle(ButtonStyle.Secondary)
+           .setDisabled(true)
+           .setEmoji('🩺')
+      );
+
+      try {
+        await channel.send({ embeds: [embed], components: [row] });
+        return interaction.reply({ content: '✅ Müsaitlik durumunuz hastalar ve yönetim için başarıyla paylaşıldı.', ephemeral: true });
+      } catch (err) {
+        console.error('Müsaitlik gönderilirken hata:', err);
+        return interaction.reply({ content: '❌ Müsaitlik bildirilirken bir hata oluştu.', ephemeral: true });
+      }
+    }
 
     // RANDEVU FORMUNUN YANITLANMASI (VATANDAŞ TARAFINDAN GÖNDERİLEN)
     if (customId === 'modal_randevu_al') {
       const isim = interaction.fields.getTextInputValue('randevu_isim');
+      const telefon = interaction.fields.getTextInputValue('randevu_telefon');
       const bolum = interaction.fields.getTextInputValue('randevu_bolum');
       const tarih = interaction.fields.getTextInputValue('randevu_tarih');
       const sikayet = interaction.fields.getTextInputValue('randevu_sikayet');
@@ -1259,7 +1376,7 @@ client.on('interactionCreate', async (interaction) => {
         .setTitle('📅 Yeni Randevu Talebi')
         .setColor('#0099ff')
         .addFields(
-          { name: '👤 Hasta Bilgisi', value: `${isim} (${user})`, inline: false },
+          { name: '👤 Hasta Bilgisi', value: `${isim} (${user})\n📞 **Tel:** ${telefon}`, inline: false },
           { name: '🏥 İstenilen Bölüm / Doktor', value: bolum, inline: true },
           { name: '🕒 Talep Edilen Tarih', value: tarih, inline: true },
           { name: '📝 Şikayet / Detay', value: sikayet, inline: false }
@@ -1287,7 +1404,7 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    // YENİ: YETKİLİNİN RANDEVUYU ONAYLAMASI VEYA REDDETMESİ
+    // YETKİLİNİN RANDEVUYU ONAYLAMASI VEYA REDDETMESİ
     if (customId.startsWith('modal_randevu_onay_') || customId.startsWith('modal_randevu_red_')) {
       const isApproved = customId.startsWith('modal_randevu_onay_');
       const parts = customId.split('_');
