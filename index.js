@@ -44,6 +44,7 @@ const CONFIG = {
   TEDAVI_UCRET_CHANNEL_ID: '1540107777752563793',
   FATURA_LOG_CHANNEL_ID: '1540364891959988324',
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
+  DATA_CHANNEL_ID: '1540782283588636713', // Mesai/fatura kalıcı veri kanalı
   
   // RANDEVU SİSTEMİ LOG KANALI
   RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
@@ -111,10 +112,164 @@ const CONFIG = {
   }
 };
 
+
 const activeShifts = new Map();
 const totalShifts = new Map();
 const userInvoices = new Map(); 
-const userInvoiceCounts = new Map(); 
+const userInvoiceCounts = new Map();
+
+// ============================================================
+// DISCORD KANALI ÜZERİNDEN KALICI VERİ SAKLAMA
+// ============================================================
+// Her kullanıcı için veri kanalında yalnızca 1 güncel mesaj tutulur.
+// Veri değiştiğinde kullanıcının eski veri mesajı silinir ve yenisi gönderilir.
+// activeShifts özellikle kaydedilmez; yalnızca tamamlanmış toplam mesai saklanır.
+
+const DATA_MESSAGE_PREFIX = 'EMS_DATA_USER:';
+
+function buildUserDataMessage(userId) {
+  const data = {
+    userId,
+    totalShiftMs: totalShifts.get(userId) || 0,
+    invoiceTotal: userInvoices.get(userId) || 0,
+    invoiceCount: userInvoiceCounts.get(userId) || 0,
+    savedAt: new Date().toISOString()
+  };
+
+  return `${DATA_MESSAGE_PREFIX}${userId}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\``;
+}
+
+function parseUserDataMessage(content) {
+  if (!content || !content.startsWith(DATA_MESSAGE_PREFIX)) return null;
+
+  const firstLineEnd = content.indexOf('\n');
+  if (firstLineEnd === -1) return null;
+
+  const userId = content.slice(DATA_MESSAGE_PREFIX.length, firstLineEnd).trim();
+  const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (!userId || !jsonMatch) return null;
+
+  try {
+    const data = JSON.parse(jsonMatch[1]);
+    return {
+      userId,
+      totalShiftMs: Number(data.totalShiftMs) || 0,
+      invoiceTotal: Number(data.invoiceTotal) || 0,
+      invoiceCount: Number(data.invoiceCount) || 0
+    };
+  } catch (error) {
+    console.error('[DATA] Veri mesajı okunamadı:', error);
+    return null;
+  }
+}
+
+async function getDataChannel() {
+  let channel = client.channels.cache.get(CONFIG.DATA_CHANNEL_ID);
+
+  if (!channel) {
+    try {
+      channel = await client.channels.fetch(CONFIG.DATA_CHANNEL_ID);
+    } catch (error) {
+      console.error('[DATA] Veri kanalı alınamadı:', error);
+      return null;
+    }
+  }
+
+  if (!channel || !channel.isTextBased()) {
+    console.error('[DATA] DATA_CHANNEL_ID geçerli bir yazı kanalı değil.');
+    return null;
+  }
+
+  return channel;
+}
+
+async function fetchAllDataMessages(channel) {
+  const allMessages = [];
+  let before;
+
+  while (true) {
+    const batch = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {})
+    });
+
+    if (batch.size === 0) break;
+
+    allMessages.push(...batch.values());
+    before = batch.last().id;
+
+    if (batch.size < 100) break;
+  }
+
+  return allMessages;
+}
+
+async function saveUserData(userId) {
+  try {
+    const channel = await getDataChannel();
+    if (!channel) return false;
+
+    const marker = `${DATA_MESSAGE_PREFIX}${userId}`;
+    const allMessages = await fetchAllDataMessages(channel);
+
+    const oldMessages = allMessages.filter(
+      msg => msg.author.id === client.user.id && msg.content.startsWith(marker)
+    );
+
+    // Kullanıcıya ait önceki kayıt(lar) tamamen silinir.
+    for (const oldMessage of oldMessages) {
+      await oldMessage.delete().catch(error => {
+        console.error(`[DATA] Eski veri mesajı silinemedi (${userId}):`, error);
+      });
+    }
+
+    // Her değişiklikte yeni mesaj gönderilir.
+    await channel.send(buildUserDataMessage(userId));
+    console.log(`[DATA] ${userId} verisi Discord kanalına kaydedildi.`);
+    return true;
+  } catch (error) {
+    console.error(`[DATA] ${userId} verisi kaydedilemedi:`, error);
+    return false;
+  }
+}
+
+async function loadPersistentData() {
+  try {
+    const channel = await getDataChannel();
+    if (!channel) return;
+
+    const allMessages = await fetchAllDataMessages(channel);
+    const latestByUser = new Map();
+
+    // En yeni mesajı esas al.
+    const sorted = [...allMessages].sort(
+      (a, b) => b.createdTimestamp - a.createdTimestamp
+    );
+
+    for (const message of sorted) {
+      if (message.author.id !== client.user.id) continue;
+
+      const parsed = parseUserDataMessage(message.content);
+      if (!parsed || latestByUser.has(parsed.userId)) continue;
+
+      latestByUser.set(parsed.userId, parsed);
+    }
+
+    totalShifts.clear();
+    userInvoices.clear();
+    userInvoiceCounts.clear();
+
+    for (const [userId, data] of latestByUser) {
+      totalShifts.set(userId, data.totalShiftMs);
+      userInvoices.set(userId, data.invoiceTotal);
+      userInvoiceCounts.set(userId, data.invoiceCount);
+    }
+
+    console.log(`[DATA] ${latestByUser.size} kullanıcının kalıcı verisi yüklendi.`);
+  } catch (error) {
+    console.error('[DATA] Kalıcı veriler yüklenemedi:', error);
+  }
+}
 const SALARY_CONFIG = {
   HOURLY_RATE: 100,      
   INVOICE_PERCENT: 10    
@@ -310,10 +465,12 @@ async function updateEgitmenPanel(guild) {
   }
 }
 
-client.once('clientReady', () => {
+client.once('clientReady', async () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
   console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
   console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
+
+  await loadPersistentData();
 });
 
 client.on('error', (error) => {
@@ -525,6 +682,7 @@ client.on('messageCreate', async (message) => {
 
       userInvoices.set(message.author.id, currentAmount + invoiceAmount);
       userInvoiceCounts.set(message.author.id, currentCount + 1);
+      await saveUserData(message.author.id);
     }
 
     try {
@@ -847,6 +1005,7 @@ client.on('messageCreate', async (message) => {
     const addMs = addMinutes * 60 * 1000;
     const currentTotal = totalShifts.get(targetUser.id) || 0;
     totalShifts.set(targetUser.id, currentTotal + addMs);
+    await saveUserData(targetUser.id);
 
     return message.reply(`✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`);
   }
@@ -863,6 +1022,7 @@ client.on('messageCreate', async (message) => {
     const currentTotal = totalShifts.get(targetUser.id) || 0;
     const newTotal = Math.max(0, currentTotal - removeMs);
     totalShifts.set(targetUser.id, newTotal);
+    await saveUserData(targetUser.id);
 
     return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
   }
@@ -872,14 +1032,25 @@ client.on('messageCreate', async (message) => {
     const param = args[1]?.toLowerCase();
 
     if (param === 'hepsi' || param === 'tümü' || param === 'tumu') {
+      const affectedUserIds = new Set([
+        ...userInvoices.keys(),
+        ...userInvoiceCounts.keys()
+      ]);
+
       userInvoices.clear();
       userInvoiceCounts.clear();
+
+      for (const userId of affectedUserIds) {
+        await saveUserData(userId);
+      }
+
       return message.reply('✅ **Tüm kullanıcıların fatura verileri ve sayıları başarıyla sıfırlandı.**');
     }
 
     if (targetUser) {
       userInvoices.delete(targetUser.id);
       userInvoiceCounts.delete(targetUser.id);
+      await saveUserData(targetUser.id);
       return message.reply(`✅ ${targetUser} kullanıcısının tüm fatura verileri başarıyla sıfırlandı.`);
     }
 
@@ -902,6 +1073,7 @@ client.on('messageCreate', async (message) => {
 
     userInvoices.set(targetUser.id, newAmount);
     userInvoiceCounts.set(targetUser.id, newCount);
+    await saveUserData(targetUser.id);
 
     return message.reply(`✅ ${targetUser} kullanıcısından **$${removeAmount}** tutarında fatura düşüldü.\n• Güncel Fatura Tutarı: **$${newAmount}**\n• Güncel Fatura Adedi: **${newCount}**`);
   }
@@ -1121,6 +1293,8 @@ client.on('interactionCreate', async (interaction) => {
               const durationMs = Date.now() - shift.startTime;
               const pastTotal = totalShifts.get(user.id) || 0;
               totalShifts.set(user.id, pastTotal + durationMs);
+      await saveUserData(user.id);
+              await saveUserData(user.id);
 
               activeShifts.delete(user.id);
 
