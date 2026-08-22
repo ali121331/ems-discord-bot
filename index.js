@@ -33,7 +33,7 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: process.env.TOKEN, // Token Render Environment Variables üzerinden güvenli şekilde çekilir
+  TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.GaZU6Y.lXFJaS8ZW5xFsZ0gcDQi8qeoJimsTN6dR4vC48', // Token Render Environment Variables üzerinden güvenli şekilde çekilir
   GUILD_ID: '1463553957019521206', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
