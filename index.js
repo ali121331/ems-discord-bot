@@ -33,7 +33,7 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: 'MTU0MDI1MjcyMjc4NjM0NTA0Mg.G9Ejg8.NbS1K10_7Lb0AdERaawa0_iqejmFmN77c0StU0',
+  TOKEN: process.env.TOKEN, // Güvenlik: Token doğrudan çevre değişkeninden okunuyor
   GUILD_ID: '', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
@@ -1584,10 +1584,12 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
+
 process.on('unhandledRejection', error => {
     console.error('Yakalanmayan Hata:', error);
 });
 process.on('uncaughtException', error => {
     console.error('Kritik Sistem Hatası:', error);
 });
+
 client.login(CONFIG.TOKEN);
