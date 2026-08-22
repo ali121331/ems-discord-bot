@@ -34,7 +34,7 @@ const client = new Client({
 
 const CONFIG = {
   TOKEN: process.env.TOKEN, // Token Render Environment Variables üzerinden güvenli şekilde çekilir
-  GUILD_ID: '', 
+  GUILD_ID: '1463553957019521206', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
   WELCOME_CHANNEL_ID: '1463553957468180700',
