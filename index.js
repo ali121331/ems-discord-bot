@@ -48,7 +48,7 @@ const CONFIG = {
   // RANDEVU SİSTEMİ LOG KANALI
   RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
   
-  // YENİ: DOKTOR MÜSAİTLİK KANALI
+  // DOKTOR MÜSAİTLİK KANALI
   DOKTOR_MUSAITLIK_CHANNEL_ID: '1540511510286311504',
 
   // AKADEMİ MAZERET BİLDİRİM VE İZİN SİSTEMİ
@@ -546,7 +546,7 @@ client.on('messageCreate', async (message) => {
   const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
-  // YENİ: DOKTOR MÜSAİTLİK PANELİ KURMA KOMUTU
+  // DOKTOR MÜSAİTLİK PANELİ KURMA KOMUTU
   if (command === '!kur-musaitlik') {
     const musaitlikEmbed = new EmbedBuilder()
       .setTitle('👨‍⚕️ Doktor Müsaitlik Bildirim Paneli')
@@ -921,7 +921,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     const { customId, user, guild } = interaction;
     
-    // YENİ: DOKTOR MÜSAİTLİK BİLDİRİM FORMU
+    // DOKTOR MÜSAİTLİK BİLDİRİM FORMU
     if (customId === 'btn_musaitlik_bildir') {
       const modal = new ModalBuilder()
         .setCustomId('modal_musaitlik_bildir')
@@ -1310,7 +1310,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit()) {
     const { customId, user, guild } = interaction;
     
-    // YENİ: MÜSAİTLİK FORMUNUN YANITLANMASI
+    // MÜSAİTLİK FORMUNUN YANITLANMASI
     if (customId === 'modal_musaitlik_bildir') {
       const gun = interaction.fields.getTextInputValue('musait_gun');
       const saat = interaction.fields.getTextInputValue('musait_saat');
@@ -1584,5 +1584,10 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
-
+process.on('unhandledRejection', error => {
+    console.error('Yakalanmayan Hata:', error);
+});
+process.on('uncaughtException', error => {
+    console.error('Kritik Sistem Hatası:', error);
+});
 client.login(CONFIG.TOKEN);
