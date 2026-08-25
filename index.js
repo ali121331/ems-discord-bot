@@ -33,7 +33,7 @@ const client = new Client({
 });
 
 const CONFIG = {
-  TOKEN: process.env.TOKEN, // Render/Railway Environment Variables üzerinden çekilir
+  TOKEN: process.env.TOKEN, // Hosting Environment Variables üzerinden çekilir
   GUILD_ID: '1463553957019521206', 
   VATANDAS_ROLE_ID: '1463553957019521208',
   HASTANE_PERSONELI_ROLE_ID: '1463553957400940731',
@@ -112,18 +112,17 @@ const CONFIG = {
   }
 };
 
-
 const activeShifts = new Map();
 const totalShifts = new Map();
 const userInvoices = new Map(); 
-const userInvoiceCounts = new Map();
+const userInvoiceCounts = new Map(); 
 
 // ============================================================
 // DISCORD KANALI ÜZERİNDEN KALICI VERİ SAKLAMA
 // ============================================================
 // Her kullanıcı için veri kanalında yalnızca 1 güncel mesaj tutulur.
-// Veri değiştiğinde kullanıcının eski veri mesajı silinir ve yenisi gönderilir.
-// activeShifts özellikle kaydedilmez; yalnızca tamamlanmış toplam mesai saklanır.
+// Eski mesaj silinir, yeni mesaj gönderilir.
+// Aktif mesai saklanmaz; yalnızca tamamlanmış toplam mesai saklanır.
 
 const DATA_MESSAGE_PREFIX = 'EMS_DATA_USER:';
 
@@ -135,20 +134,16 @@ function buildUserDataMessage(userId) {
     invoiceCount: userInvoiceCounts.get(userId) || 0,
     savedAt: new Date().toISOString()
   };
-
   return `${DATA_MESSAGE_PREFIX}${userId}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\``;
 }
 
 function parseUserDataMessage(content) {
   if (!content || !content.startsWith(DATA_MESSAGE_PREFIX)) return null;
-
   const firstLineEnd = content.indexOf('\n');
   if (firstLineEnd === -1) return null;
-
   const userId = content.slice(DATA_MESSAGE_PREFIX.length, firstLineEnd).trim();
   const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/i);
   if (!userId || !jsonMatch) return null;
-
   try {
     const data = JSON.parse(jsonMatch[1]);
     return {
@@ -165,42 +160,33 @@ function parseUserDataMessage(content) {
 
 async function getDataChannel() {
   let channel = client.channels.cache.get(CONFIG.DATA_CHANNEL_ID);
-
   if (!channel) {
-    try {
-      channel = await client.channels.fetch(CONFIG.DATA_CHANNEL_ID);
-    } catch (error) {
+    try { channel = await client.channels.fetch(CONFIG.DATA_CHANNEL_ID); }
+    catch (error) {
       console.error('[DATA] Veri kanalı alınamadı:', error);
       return null;
     }
   }
-
   if (!channel || !channel.isTextBased()) {
     console.error('[DATA] DATA_CHANNEL_ID geçerli bir yazı kanalı değil.');
     return null;
   }
-
   return channel;
 }
 
 async function fetchAllDataMessages(channel) {
   const allMessages = [];
   let before;
-
   while (true) {
     const batch = await channel.messages.fetch({
       limit: 100,
       ...(before ? { before } : {})
     });
-
     if (batch.size === 0) break;
-
     allMessages.push(...batch.values());
     before = batch.last().id;
-
     if (batch.size < 100) break;
   }
-
   return allMessages;
 }
 
@@ -208,22 +194,16 @@ async function saveUserData(userId) {
   try {
     const channel = await getDataChannel();
     if (!channel) return false;
-
     const marker = `${DATA_MESSAGE_PREFIX}${userId}`;
     const allMessages = await fetchAllDataMessages(channel);
-
     const oldMessages = allMessages.filter(
       msg => msg.author.id === client.user.id && msg.content.startsWith(marker)
     );
-
-    // Kullanıcıya ait önceki kayıt(lar) tamamen silinir.
     for (const oldMessage of oldMessages) {
-      await oldMessage.delete().catch(error => {
-        console.error(`[DATA] Eski veri mesajı silinemedi (${userId}):`, error);
-      });
+      await oldMessage.delete().catch(error =>
+        console.error(`[DATA] Eski veri mesajı silinemedi (${userId}):`, error)
+      );
     }
-
-    // Her değişiklikte yeni mesaj gönderilir.
     await channel.send(buildUserDataMessage(userId));
     console.log(`[DATA] ${userId} verisi Discord kanalına kaydedildi.`);
     return true;
@@ -237,34 +217,23 @@ async function loadPersistentData() {
   try {
     const channel = await getDataChannel();
     if (!channel) return;
-
     const allMessages = await fetchAllDataMessages(channel);
     const latestByUser = new Map();
-
-    // En yeni mesajı esas al.
-    const sorted = [...allMessages].sort(
-      (a, b) => b.createdTimestamp - a.createdTimestamp
-    );
-
+    const sorted = [...allMessages].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
     for (const message of sorted) {
       if (message.author.id !== client.user.id) continue;
-
       const parsed = parseUserDataMessage(message.content);
       if (!parsed || latestByUser.has(parsed.userId)) continue;
-
       latestByUser.set(parsed.userId, parsed);
     }
-
     totalShifts.clear();
     userInvoices.clear();
     userInvoiceCounts.clear();
-
     for (const [userId, data] of latestByUser) {
       totalShifts.set(userId, data.totalShiftMs);
       userInvoices.set(userId, data.invoiceTotal);
       userInvoiceCounts.set(userId, data.invoiceCount);
     }
-
     console.log(`[DATA] ${latestByUser.size} kullanıcının kalıcı verisi yüklendi.`);
   } catch (error) {
     console.error('[DATA] Kalıcı veriler yüklenemedi:', error);
@@ -465,12 +434,10 @@ async function updateEgitmenPanel(guild) {
   }
 }
 
-client.once('clientReady', async () => {
+client.once('ready', () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
   console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
   console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
-
-  await loadPersistentData();
 });
 
 client.on('error', (error) => {
@@ -742,8 +709,19 @@ client.on('messageCreate', async (message) => {
 
   // DM ÜZERİNDEN RANDEVU PANELİ GÖNDERME KOMUTU
   if (command === '!randevu-gonder') {
-    const targetUser = message.mentions.users.first() || client.users.cache.get(args[1]);
-    if (!targetUser) return message.reply('❌ **Hatalı kullanım:** Lütfen bir kullanıcı etiketleyin veya ID girin. (Örn: `!randevu-gonder @Vatandaş`)');
+    let targetUser = message.mentions.users.first();
+
+    if (!targetUser && args[1]) {
+      try {
+        targetUser = await client.users.fetch(args[1]);
+      } catch (error) {
+        return message.reply('❌ **Bu ID ile bir Discord kullanıcısı bulunamadı.**');
+      }
+    }
+
+    if (!targetUser) {
+      return message.reply('❌ **Hatalı kullanım:** `!randevu-gonder @Kullanıcı` veya `!randevu-gonder KULLANICI_ID`');
+    }
 
     const randevuEmbed = new EmbedBuilder()
       .setTitle('🏥 Hastane Randevu Sistemi')
@@ -1032,18 +1010,10 @@ client.on('messageCreate', async (message) => {
     const param = args[1]?.toLowerCase();
 
     if (param === 'hepsi' || param === 'tümü' || param === 'tumu') {
-      const affectedUserIds = new Set([
-        ...userInvoices.keys(),
-        ...userInvoiceCounts.keys()
-      ]);
-
+      const affectedUserIds = new Set([...userInvoices.keys(), ...userInvoiceCounts.keys()]);
       userInvoices.clear();
       userInvoiceCounts.clear();
-
-      for (const userId of affectedUserIds) {
-        await saveUserData(userId);
-      }
-
+      for (const userId of affectedUserIds) await saveUserData(userId);
       return message.reply('✅ **Tüm kullanıcıların fatura verileri ve sayıları başarıyla sıfırlandı.**');
     }
 
@@ -1767,30 +1737,30 @@ if (!CONFIG.TOKEN) {
 // ============================================================
 // DISCORD BAĞLANTISI
 // ============================================================
-// Not: Geçici REST testleri kaldırıldı. Her açılışta /users/@me ve
-// /gateway/bot uçlarına gereksiz istek gönderilmez.
-
 client.on('shardReady', (shardId) => {
   console.log(`[GATEWAY] Shard ${shardId} HAZIR.`);
 });
 
 client.on('shardDisconnect', (event, shardId) => {
-  console.error(
-    `[GATEWAY DISCONNECT] Shard: ${shardId} | Kod: ${event.code} | Sebep: ${event.reason || 'Yok'}`
-  );
+  console.error(`[GATEWAY DISCONNECT] Shard: ${shardId} | Kod: ${event.code} | Sebep: ${event.reason || 'Yok'}`);
 });
 
 client.on('shardReconnecting', (shardId) => {
   console.log(`[GATEWAY] Shard ${shardId} yeniden bağlanıyor...`);
 });
 
+client.once('clientReady', async () => {
+  console.log(`[BOT] ${client.user.tag} aktif!`);
+  console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
+  console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
+  await loadPersistentData();
+});
+
 if (!CONFIG.TOKEN) {
   console.error('[BOT] KRİTİK: TOKEN environment variable bulunamadı.');
-  console.error('[BOT] Hosting panelinde Environment/Variables bölümüne TOKEN ekleyin.');
   process.exitCode = 1;
 } else {
   console.log('[BOT] TOKEN bulundu. Discord bağlantısı başlatılıyor...');
-
   client.login(CONFIG.TOKEN).catch((error) => {
     console.error('[BOT] Discord giriş hatası:', error);
   });
