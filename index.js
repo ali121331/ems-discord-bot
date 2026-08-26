@@ -46,6 +46,7 @@ const CONFIG = {
   NAME_CHANGE_CHANNEL_ID: '1540108109433933905',
   DATA_CHANNEL_ID: '1540782283588636713', // Mesai/fatura kalıcı veri kanalı
   YETKILI_LOG_CHANNEL_ID: '1542142172315394069',
+  WEEKLY_HISTORY_CHANNEL_ID: '1542145346027659304', // Mesai/fatura tarih bazlı geçmiş log kanalı
   
   // RANDEVU SİSTEMİ LOG KANALI
   RANDEVU_LOG_CHANNEL_ID: '1540130373004951693',
@@ -345,6 +346,98 @@ function formatDuration(ms) {
   return `${hours} saat ${minutes} dakika`;
 }
 
+
+
+const HISTORY_PREFIX = 'EMS_WEEKLY_HISTORY:';
+
+function getISOWeekRange(date = new Date()) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay() || 7;
+
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() - day + 1);
+  monday.setUTCHours(0, 0, 0, 0);
+
+  const nextMonday = new Date(monday);
+  nextMonday.setUTCDate(monday.getUTCDate() + 7);
+
+  return { start: monday, end: nextMonday };
+}
+
+async function logWeeklyHistory(guild, payload) {
+  try {
+    const channel = await resolveTextChannel(guild, CONFIG.WEEKLY_HISTORY_CHANNEL_ID);
+    if (!channel) {
+      console.error('[HAFTALIK LOG] Log kanalı bulunamadı.');
+      return false;
+    }
+
+    const data = {
+      ...payload,
+      timestamp: new Date().toISOString()
+    };
+
+    await channel.send(
+      `${HISTORY_PREFIX}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\``
+    );
+
+    return true;
+  } catch (error) {
+    console.error('[HAFTALIK LOG] Kayıt gönderilemedi:', error);
+    return false;
+  }
+}
+
+function parseWeeklyHistoryMessage(content) {
+  if (!content || !content.startsWith(HISTORY_PREFIX)) return null;
+
+  const match = content.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (!match) return null;
+
+  try {
+    const data = JSON.parse(match[1]);
+    if (!data.timestamp || !data.userId || !data.type) return null;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function loadCurrentWeekHistory(guild) {
+  const channel = await resolveTextChannel(guild, CONFIG.WEEKLY_HISTORY_CHANNEL_ID);
+  if (!channel) return [];
+
+  const { start, end } = getISOWeekRange(new Date());
+  const rows = [];
+
+  let before;
+  while (true) {
+    const batch = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {})
+    });
+
+    if (batch.size === 0) break;
+
+    for (const msg of batch.values()) {
+      if (msg.author.id !== client.user.id) continue;
+
+      const parsed = parseWeeklyHistoryMessage(msg.content);
+      if (!parsed) continue;
+
+      const ts = new Date(parsed.timestamp);
+      if (ts >= start && ts < end) {
+        rows.push(parsed);
+      }
+    }
+
+    const oldest = batch.last();
+    if (!oldest || oldest.createdAt < start || batch.size < 100) break;
+    before = oldest.id;
+  }
+
+  return rows;
+}
 
 const SALARY_CONFIG = {
   HOURLY_RATE: 100,      
@@ -762,6 +855,14 @@ client.on('messageCreate', async (message) => {
       weeklyInvoiceCounts.set(message.author.id, (weeklyInvoiceCounts.get(message.author.id) || 0) + 1);
 
       await saveUserData(message.author.id);
+
+      await logWeeklyHistory(message.guild, {
+        type: 'invoice',
+        userId: message.author.id,
+        amountDelta: invoiceAmount,
+        countDelta: 1,
+        source: 'treatment_invoice'
+      });
     }
 
     try {
@@ -1106,6 +1207,14 @@ client.on('messageCreate', async (message) => {
 
     await saveUserData(targetUser.id);
 
+    await logWeeklyHistory(message.guild, {
+      type: 'shift',
+      userId: targetUser.id,
+      msDelta: addMs,
+      source: 'manual_add',
+      actorId: message.author.id
+    });
+
     return message.reply(`✅ ${targetUser} kullanıcısının mesai süresine **${addMinutes} dakika** eklendi.`);
   }
 
@@ -1126,6 +1235,14 @@ client.on('messageCreate', async (message) => {
     weeklyShifts.set(targetUser.id, Math.max(0, (weeklyShifts.get(targetUser.id) || 0) - removeMs));
 
     await saveUserData(targetUser.id);
+
+    await logWeeklyHistory(message.guild, {
+      type: 'shift',
+      userId: targetUser.id,
+      msDelta: -removeMs,
+      source: 'manual_remove',
+      actorId: message.author.id
+    });
 
     return message.reply(`🛑 ${targetUser} kullanıcısının mesai süresinden **${removeMinutes} dakika** çıkarıldı.`);
   }
@@ -1240,14 +1357,39 @@ client.on('messageCreate', async (message) => {
     });
   }
 
-  // Gerçek haftalık sayaçlardan yönetim raporu
+  // Tarih bazlı Discord log kanalından haftalık rapor oluşturur
   if (command === '!haftalik-rapor') {
     const currentWeek = getCurrentWeekKey();
+    const historyRows = await loadCurrentWeekHistory(message.guild);
+
+    const shiftByUser = new Map();
+    const invoiceByUser = new Map();
+    const invoiceCountByUser = new Map();
+
+    for (const row of historyRows) {
+      if (row.type === 'shift') {
+        shiftByUser.set(
+          row.userId,
+          (shiftByUser.get(row.userId) || 0) + (Number(row.msDelta) || 0)
+        );
+      }
+
+      if (row.type === 'invoice') {
+        invoiceByUser.set(
+          row.userId,
+          (invoiceByUser.get(row.userId) || 0) + (Number(row.amountDelta) || 0)
+        );
+        invoiceCountByUser.set(
+          row.userId,
+          (invoiceCountByUser.get(row.userId) || 0) + (Number(row.countDelta) || 0)
+        );
+      }
+    }
 
     const userIds = new Set([
-      ...weeklyShifts.keys(),
-      ...weeklyInvoices.keys(),
-      ...weeklyInvoiceCounts.keys()
+      ...shiftByUser.keys(),
+      ...invoiceByUser.keys(),
+      ...invoiceCountByUser.keys()
     ]);
 
     let totalWeeklyShiftMs = 0;
@@ -1258,19 +1400,18 @@ client.on('messageCreate', async (message) => {
     const invoiceRows = [];
 
     for (const userId of userIds) {
-      ensureWeeklyBucket(userId);
-      if (weeklyKeys.get(userId) !== currentWeek) continue;
-
-      const shiftMs = weeklyShifts.get(userId) || 0;
-      const invoiceTotal = weeklyInvoices.get(userId) || 0;
-      const invoiceCount = weeklyInvoiceCounts.get(userId) || 0;
+      const shiftMs = Math.max(0, shiftByUser.get(userId) || 0);
+      const invoiceTotal = Math.max(0, invoiceByUser.get(userId) || 0);
+      const invoiceCount = Math.max(0, invoiceCountByUser.get(userId) || 0);
 
       totalWeeklyShiftMs += shiftMs;
       totalWeeklyInvoices += invoiceTotal;
       totalWeeklyInvoiceCount += invoiceCount;
 
       if (shiftMs > 0) shiftRows.push([userId, shiftMs]);
-      if (invoiceTotal > 0) invoiceRows.push([userId, invoiceTotal, invoiceCount]);
+      if (invoiceTotal > 0 || invoiceCount > 0) {
+        invoiceRows.push([userId, invoiceTotal, invoiceCount]);
+      }
     }
 
     shiftRows.sort((a, b) => b[1] - a[1]);
@@ -1284,21 +1425,22 @@ client.on('messageCreate', async (message) => {
       .map(([id, amount, count], i) => `${i + 1}. <@${id}> — $${amount} (${count} fatura)`)
       .join('\n') || 'Kayıt yok';
 
-    const reportChannel = message.channel;
-
     const embed = new EmbedBuilder()
       .setTitle(`📊 EMS Haftalık Yönetim Raporu — ${currentWeek}`)
       .setColor('#0099ff')
       .addFields(
         { name: '⏱️ Haftalık Toplam Mesai', value: formatDuration(totalWeeklyShiftMs), inline: true },
         { name: '🧾 Haftalık Fatura', value: `$${totalWeeklyInvoices} / ${totalWeeklyInvoiceCount} adet`, inline: true },
-        { name: '👥 Kayıtlı Aktif Personel', value: `${userIds.size}`, inline: true },
+        { name: '👥 Haftalık Aktif Personel', value: `${userIds.size}`, inline: true },
         { name: '🏆 En Aktif Personeller', value: topShift, inline: false },
         { name: '💰 En Yüksek Fatura Tutarları', value: topInvoice, inline: false }
       )
+      .setFooter({ text: `Kaynak log kanalı: ${CONFIG.WEEKLY_HISTORY_CHANNEL_ID}` })
       .setTimestamp();
 
-    await reportChannel.send({ embeds: [embed] });
+    // Rapor her zaman komutun yazıldığı kanala gider.
+    await message.channel.send({ embeds: [embed] });
+
     return message.reply('✅ Haftalık rapor oluşturuldu.');
   }
 
@@ -1406,6 +1548,15 @@ client.on('messageCreate', async (message) => {
     weeklyInvoiceCounts.set(targetUser.id, Math.max(0, (weeklyInvoiceCounts.get(targetUser.id) || 0) - 1));
 
     await saveUserData(targetUser.id);
+
+    await logWeeklyHistory(message.guild, {
+      type: 'invoice',
+      userId: targetUser.id,
+      amountDelta: -removeAmount,
+      countDelta: -1,
+      source: 'manual_remove',
+      actorId: message.author.id
+    });
 
     return message.reply(`✅ ${targetUser} kullanıcısından **$${removeAmount}** tutarında fatura düşüldü.\n• Güncel Fatura Tutarı: **$${newAmount}**\n• Güncel Fatura Adedi: **${newCount}**`);
   }
@@ -1631,6 +1782,13 @@ client.on('interactionCreate', async (interaction) => {
 
               await saveUserData(user.id);
 
+              await logWeeklyHistory(interaction.guild, {
+                type: 'shift',
+                userId: user.id,
+                msDelta: durationMs,
+                source: 'auto_timeout'
+              });
+
               activeShifts.delete(user.id);
 
               try {
@@ -1693,6 +1851,13 @@ client.on('interactionCreate', async (interaction) => {
       weeklyShifts.set(user.id, (weeklyShifts.get(user.id) || 0) + durationMs);
 
       await saveUserData(user.id);
+
+      await logWeeklyHistory(interaction.guild, {
+        type: 'shift',
+        userId: user.id,
+        msDelta: durationMs,
+        source: 'normal_exit'
+      });
 
       activeShifts.delete(user.id);
 
