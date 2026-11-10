@@ -2313,7 +2313,7 @@ client.once('clientReady', async () => {
   console.log(`[BOT] ${client.user.tag} aktif!`);
   console.log(`[BOT] Discord bağlantısı başarılı. Guild sayısı: ${client.guilds.cache.size}`);
   console.log(`[BOT] Kullanıcı ID: ${client.user.id}`);
-  setupNovember10Description(client, '1881 – ∞ 🖤\\n10 Kasım 1938 – 09.05\\nGazi Mustafa Kemal Atatürk’ü ebediyete intikalinin 88. yılında saygı, rahmet ve minnetle anıyoruz.\\nFikirlerin ve mirasın daima yaşayacak. 🇹🇷', "EMS hastane ve personel yönetim botu.");
+  setupNovember10Description(client, '1881 – ∞ 🖤\n10 Kasım 1938 – 09.05\nGazi Mustafa Kemal Atatürk’ü ebediyete intikalinin 88. yılında saygı, rahmet ve minnetle anıyoruz.\nFikirlerin ve mirasın daima yaşayacak. 🇹🇷', "EMS hastane ve personel yönetim botu.");
   await loadPersistentData();
 
   // Kalıcı kayıtta izinli görünen kişilerin rolünü açılışta doğrula.
